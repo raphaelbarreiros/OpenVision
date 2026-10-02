@@ -53,7 +53,7 @@
 - **Apple Intelligence**: Apple's on-device Foundation Model (iOS 26+). **No download, no memory pressure** (OS-managed), private and offline. Uses guided generation + Apple's native tool-calling.
 - **OpenClaw**: Wake word activation, 56+ tools, task execution via WebSocket
 - **Gemini Live**: Real-time voice + vision with native audio streaming
-- **OpenAI**: GPT-4o text + vision over the Chat Completions API — works with any **OpenAI-compatible** endpoint (OpenRouter, Groq, local servers, etc.). Also drives **live video** via the **Realtime API** (`gpt-realtime`) — continuous voice + camera frames (see below).
+- **OpenAI**: GPT-4o text + vision over the Chat Completions API — works with any **OpenAI-compatible** endpoint (OpenRouter, Groq, local servers, etc.). Also drives **live video** via the **Realtime API** (`gpt-realtime`) — continuous voice + camera frames (see below). No API key? **Sign in with your ChatGPT subscription** instead (text + photos; live video needs a key).
 
 ### Live Video — Real-Time Voice + Vision
 Say **"Ok Vision, start video stream"** to enter a live mode where the glasses camera stays on and the AI answers questions about what you're seeing. Ask freely — no wake word between questions — until you say **"stop video"**. Live video routes to whichever backend you've selected:
@@ -220,6 +220,15 @@ Full instructions, CLI build commands, and troubleshooting: **[SETUP.md](SETUP.m
 1. Get an [OpenAI API key](https://platform.openai.com/api-keys)
 2. Settings → AI Backend → **OpenAI**, paste the key (and optionally a base URL / models)
 3. Say **"Ok Vision, start video stream"** to use live video over the Realtime API
+
+**For OpenAI with a ChatGPT subscription (no API key):**
+1. Settings → AI Backend → **OpenAI** → **ChatGPT Subscription** → **Sign in with ChatGPT**
+2. Pick a model from your plan's list (smaller models answer faster)
+3. Text, photo questions, web search and tools work; live video still needs an API key (or Gemini)
+
+> This signs in the way the Codex CLI does and uses the backend the CLI talks to. It's not an
+> official OpenAI API, so it can change or stop working without notice. Tokens are stored in the
+> iOS Keychain.
 
 **For on-device vision (SmolVLM2):**
 1. Settings → AI Backend → **Local (MLX)**

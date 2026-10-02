@@ -1,5 +1,6 @@
 // OpenVision - OpenAIService.swift
-// Cloud backend for the OpenAI Chat Completions API (and any OpenAI-compatible endpoint).
+// Cloud backend for the OpenAI Chat Completions API (and any OpenAI-compatible endpoint), or a
+// ChatGPT subscription via the Responses API (see ChatGPTSubscription).
 //
 // Simple request/response (non-streaming) — reliable for validating the cloud command + vision
 // path. Supports text and images (base64 data URL). The reply is delivered via `onAgentMessage`,
@@ -35,12 +36,18 @@ final class OpenAIService: ObservableObject {
         guard settings.isOpenAIConfigured else { throw OpenAIError.notConfigured }
         // Record the utterance for the tool registry's relative-time guard.
         NativeToolContext.shared.set(text)
-        guard let url = URL(string: "\(settings.openAIBaseURL)/chat/completions") else {
-            throw OpenAIError.badURL
-        }
 
         onProcessingChanged?(true)
         defer { onProcessingChanged?(false) }
+
+        if settings.openAIAuthMode == .chatGPTSubscription {
+            try await sendViaSubscription(text, imageData: imageData)
+            return
+        }
+
+        guard let url = URL(string: "\(settings.openAIBaseURL)/chat/completions") else {
+            throw OpenAIError.badURL
+        }
 
         // Build the user content: plain string for text-only, or the multimodal array with an
         // image_url data URL when a photo is attached.
@@ -71,23 +78,7 @@ final class OpenAIService: ObservableObject {
         }
         messages.append(["role": "user", "content": userContent])
 
-        // Agentic web-search tool: the model calls it for current info, we run it, feed the result
-        // back, and it can refine or answer — an iterative loop (OpenGlasses' cloud pattern).
-        let webSearchTool: [String: Any] = [
-            "type": "function",
-            "function": [
-                "name": "web_search",
-                "description": "Search the web for current, real-time information — news, weather, prices, sports scores, recent events, or anything you're not certain of. Use it whenever the user asks about something current.",
-                "parameters": [
-                    "type": "object",
-                    "properties": ["query": ["type": "string", "description": "The search query"]],
-                    "required": ["query"]
-                ]
-            ]
-        ]
-
-        // Web search + on-device productivity tools (timers, reminders, calendar, notes, clipboard…).
-        let tools = [webSearchTool] + NativeToolRegistry.shared.openAISpecs
+        let tools = toolSpecs()
 
         let maxIterations = 4
         for _ in 0..<maxIterations {
@@ -120,19 +111,7 @@ final class OpenAIService: ObservableObject {
                     let id = call["id"] as? String ?? ""
                     let fn = call["function"] as? [String: Any]
                     let toolName = fn?["name"] as? String ?? ""
-                    let argsStr = fn?["arguments"] as? String ?? "{}"
-                    let args = (try? JSONSerialization.jsonObject(with: Data(argsStr.utf8))) as? [String: Any] ?? [:]
-
-                    let result: String
-                    if toolName == "web_search" {
-                        let query = (args["query"] as? String) ?? ""
-                        NSLog("[OpenAI] web_search: \"%@\"", query)
-                        let r = await WebSearchService.search(query)
-                        result = r.isEmpty ? "No results found for \"\(query)\"." : r
-                    } else {
-                        NSLog("[OpenAI] native tool: %@", toolName)
-                        result = await NativeToolRegistry.shared.execute(name: toolName, args: args)
-                    }
+                    let result = await runTool(toolName, arguments: fn?["arguments"] as? String)
                     messages.append(["role": "tool", "tool_call_id": id, "content": result])
                 }
                 continue
@@ -147,6 +126,92 @@ final class OpenAIService: ObservableObject {
             return
         }
         throw OpenAIError.api("search loop didn't converge")
+    }
+
+    // MARK: - ChatGPT subscription (Responses API)
+
+    /// Same conversation, tools and loop as the Chat Completions path, sent to the ChatGPT
+    /// subscription backend in Responses format.
+    private func sendViaSubscription(_ text: String, imageData: Data?) async throws {
+        var instructions = systemPrompt()
+        if let docContext = DocumentFocus.shared.contextForQuery(text) {
+            instructions += "\n\n" + docContext
+        }
+
+        var input: [[String: Any]] = ConversationContext.shared.turns.map { turn in
+            let type = turn.role == "assistant" ? "output_text" : "input_text"
+            return ["role": turn.role, "content": [["type": type, "text": turn.content]]]
+        }
+        var userContent: [[String: Any]] = [["type": "input_text", "text": text.isEmpty && imageData != nil ? "Describe what you see." : text]]
+        if let imageData {
+            userContent.append(["type": "input_image", "image_url": "data:image/jpeg;base64,\(imageData.base64EncodedString())"])
+        }
+        input.append(["role": "user", "content": userContent])
+
+        let tools = ChatGPTSubscription.responsesTools(fromChatTools: toolSpecs())
+        let model = settings.openAISubscriptionModel.isEmpty ? ChatGPTSubscription.defaultModel : settings.openAISubscriptionModel
+
+        for _ in 0..<4 {
+            let items = try await ChatGPTSubscription.respond(model: model, instructions: instructions, input: input, tools: tools)
+            // Echo every item (reasoning included) back — the backend is stateless (store:false).
+            input.append(contentsOf: items)
+
+            let calls = items.filter { $0["type"] as? String == "function_call" }
+            if !calls.isEmpty {
+                for call in calls {
+                    let result = await runTool(call["name"] as? String ?? "", arguments: call["arguments"] as? String)
+                    input.append(["type": "function_call_output", "call_id": call["call_id"] as? String ?? "", "output": result])
+                }
+                continue
+            }
+
+            let reply = items
+                .filter { $0["type"] as? String == "message" }
+                .flatMap { ($0["content"] as? [[String: Any]]) ?? [] }
+                .compactMap { $0["type"] as? String == "output_text" ? $0["text"] as? String : nil }
+                .joined()
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !reply.isEmpty else { throw OpenAIError.emptyReply }
+            ConversationContext.shared.record(user: text, assistant: reply)
+            onAgentMessage?(reply)
+            return
+        }
+        throw OpenAIError.api("search loop didn't converge")
+    }
+
+    // MARK: - Tools
+
+    /// Agentic web search + on-device productivity tools (timers, reminders, calendar, notes,
+    /// clipboard…), in Chat Completions format.
+    private func toolSpecs() -> [[String: Any]] {
+        // Agentic web-search tool: the model calls it for current info, we run it, feed the result
+        // back, and it can refine or answer — an iterative loop (OpenGlasses' cloud pattern).
+        let webSearchTool: [String: Any] = [
+            "type": "function",
+            "function": [
+                "name": "web_search",
+                "description": "Search the web for current, real-time information — news, weather, prices, sports scores, recent events, or anything you're not certain of. Use it whenever the user asks about something current.",
+                "parameters": [
+                    "type": "object",
+                    "properties": ["query": ["type": "string", "description": "The search query"]],
+                    "required": ["query"]
+                ]
+            ]
+        ]
+        return [webSearchTool] + NativeToolRegistry.shared.openAISpecs
+    }
+
+    /// Execute one tool call (web_search or a native tool) and return its result text.
+    private func runTool(_ toolName: String, arguments: String?) async -> String {
+        let args = (try? JSONSerialization.jsonObject(with: Data((arguments ?? "{}").utf8))) as? [String: Any] ?? [:]
+        if toolName == "web_search" {
+            let query = (args["query"] as? String) ?? ""
+            NSLog("[OpenAI] web_search: \"%@\"", query)
+            let r = await WebSearchService.search(query)
+            return r.isEmpty ? "No results found for \"\(query)\"." : r
+        }
+        NSLog("[OpenAI] native tool: %@", toolName)
+        return await NativeToolRegistry.shared.execute(name: toolName, args: args)
     }
 
     // MARK: - Prompt
@@ -201,7 +266,7 @@ final class OpenAIService: ObservableObject {
         case notConfigured, badURL, noResponse, emptyReply, api(String)
         var errorDescription: String? {
             switch self {
-            case .notConfigured: return "OpenAI isn't configured. Add your API key in Settings → OpenAI."
+            case .notConfigured: return "OpenAI isn't configured. Add an API key or sign in to ChatGPT in Settings → OpenAI."
             case .badURL: return "The OpenAI base URL is invalid."
             case .noResponse: return "No response from OpenAI."
             case .emptyReply: return "OpenAI returned an empty reply."

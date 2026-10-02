@@ -28,7 +28,7 @@ enum AIBackendType: String, Codable, CaseIterable {
         case .geminiLive:
             return "Real-time voice + vision, continuous conversation"
         case .openAI:
-            return "GPT-4o — cloud text + vision (OpenAI-compatible)"
+            return "GPT — cloud text + vision (API key or ChatGPT subscription)"
         case .appleFoundation:
             return "On-device Apple model — private, no download (iOS 26+)"
         case .localGemma:
@@ -43,6 +43,34 @@ enum AIBackendType: String, Codable, CaseIterable {
         case .openAI: return "sparkles"
         case .appleFoundation: return "apple.logo"
         case .localGemma: return "cpu"
+        }
+    }
+}
+
+/// How the OpenAI backend authenticates.
+enum OpenAIAuthMode: String, Codable, CaseIterable, Identifiable {
+    /// API key against the public API (or any OpenAI-compatible base URL).
+    case apiKey = "api_key"
+    /// Sign in with a ChatGPT subscription (see ChatGPTSubscription).
+    case chatGPTSubscription = "chatgpt_subscription"
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .apiKey: return "API Key"
+        case .chatGPTSubscription: return "ChatGPT Subscription"
+        }
+    }
+    /// The trade-off, shown where the choice is made.
+    var summary: String {
+        switch self {
+        case .apiKey: return "Pay per use. Works with live video and OpenAI-compatible services."
+        case .chatGPTSubscription: return "Use your Plus or Pro plan. Text and photos; no live video."
+        }
+    }
+    var icon: String {
+        switch self {
+        case .apiKey: return "key"
+        case .chatGPTSubscription: return "person.crop.circle"
         }
     }
 }
@@ -81,6 +109,13 @@ struct AppSettings: Codable, Equatable {
     var geminiAPIKey: String = ""
 
     // MARK: - OpenAI Configuration
+
+    /// API key, or a ChatGPT subscription sign-in (tokens live in the Keychain, not here).
+    var openAIAuthMode: OpenAIAuthMode = .apiKey
+
+    /// Model used with a ChatGPT subscription. The subscription serves a different, per-account
+    /// set of models than the API, so this is separate from `openAIModel`.
+    var openAISubscriptionModel: String = ChatGPTSubscription.defaultModel
 
     /// OpenAI (or OpenAI-compatible) API key.
     var openAIAPIKey: String = ""
@@ -191,8 +226,21 @@ struct AppSettings: Codable, Equatable {
         !geminiAPIKey.isEmpty
     }
 
-    /// Whether OpenAI is configured (has API key)
+    /// Whether OpenAI is configured (API key, or signed in to a ChatGPT subscription)
     var isOpenAIConfigured: Bool {
+        switch openAIAuthMode {
+        case .apiKey: return isOpenAIAPIKeyConfigured
+        case .chatGPTSubscription: return OAuthTokenStore.shared.isSignedIn(ChatGPTSubscription.provider)
+        }
+    }
+
+    /// Whether OpenAI Realtime (live video) can be used. It needs a real API key — the ChatGPT
+    /// subscription backend serves the Responses API only.
+    var isOpenAIRealtimeAvailable: Bool {
+        openAIAuthMode == .apiKey && isOpenAIAPIKeyConfigured
+    }
+
+    private var isOpenAIAPIKeyConfigured: Bool {
         !openAIAPIKey.isEmpty && !openAIBaseURL.isEmpty
     }
 

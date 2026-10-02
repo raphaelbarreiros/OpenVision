@@ -1078,17 +1078,18 @@ final class VoiceAgentViewModel: ObservableObject {
     }
 
     /// Resolve which live-video backend to use, or nil if none is configured.
-    /// - OpenAI selected + configured → OpenAI Realtime
-    /// - otherwise Gemini if configured (default video provider), else OpenAI if configured.
+    /// - OpenAI selected + API key → OpenAI Realtime
+    /// - otherwise Gemini if configured (default video provider), else OpenAI if it has an API key.
+    /// A ChatGPT subscription can't drive Realtime, so it falls through to Gemini.
     private func resolveLiveService() -> (service: any LiveVideoService, label: String)? {
         let settings = settingsManager.settings
-        if settings.aiBackend == .openAI && settings.isOpenAIConfigured {
+        if settings.aiBackend == .openAI && settings.isOpenAIRealtimeAvailable {
             return (openAIRealtime, "OpenAI Realtime")
         }
         if settings.isGeminiConfigured {
             return (geminiLive, "Gemini Live")
         }
-        if settings.isOpenAIConfigured {
+        if settings.isOpenAIRealtimeAvailable {
             return (openAIRealtime, "OpenAI Realtime")
         }
         return nil

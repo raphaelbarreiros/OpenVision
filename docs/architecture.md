@@ -9,13 +9,15 @@ OpenVision/
 ├── Managers/            App-wide state: SettingsManager, GlassesManager
 ├── Models/              Value types & settings enums (AIBackendType, TTSEngineType, …)
 ├── Services/            One folder per domain — the backbone of the app
-│   ├── AIBackend/       AIBackend protocol + registry + conformances, OpenAIService
+│   ├── AIBackend/       AIBackend protocol + registry + conformances, OpenAIService,
+│   │                    ChatGPTSubscription (ChatGPT plan backend)
 │   ├── AppleFoundation/ Apple Intelligence backend (+ its native Tool wrappers)
 │   ├── Audio/           Audio session, capture, playback, sounds
 │   ├── GeminiLive/      Gemini Live websocket backend + Gemini vision
 │   ├── GemmaLocal/      On-device MLX models (Gemma 4, SmolVLM2, FastVLM, Qwen)
 │   ├── LocalAgent/      Shared routing brain for on-device models (JSON-in-text)
 │   ├── NativeTools/     Productivity tools (timer, reminder, calendar, note, …)
+│   ├── OAuth/           Subscription sign-in: PKCE, loopback redirect, Keychain tokens
 │   ├── OpenAIRealtime/  OpenAI Realtime (live audio/video)
 │   ├── OpenClaw/        OpenClaw agentic backend
 │   ├── TTS/             Apple TTS + Kokoro neural TTS
@@ -41,6 +43,10 @@ OpenVisionTests/         Unit tests (pure logic: date resolution, routing, chunk
   - `NativeTool` — one productivity tool; the registry adapts it to every backend's
     function-calling format ([docs/native-tools.md](native-tools.md)).
   - `LiveVideoService` — realtime audio/video backends (Gemini Live, OpenAI Realtime).
+- **Subscription sign-in** (`Services/OAuth`) is provider-agnostic: an `OAuthProvider` value
+  holds the client id, endpoints and loopback redirect, `OAuthSignIn.signIn(_:)` runs the flow,
+  and `OAuthTokenStore.shared.freshCredentials(for:)` hands back a refreshed token. A backend
+  that supports a subscription only needs its provider config.
 - **Services are singletons** (`Service.shared`) orchestrated from the ViewModel. Pure logic
   that needs testing lives in enums/free functions (`NativeToolSupport`, `LocalAgent`,
   `TextChunking`) so tests never touch hardware, network, or models.
