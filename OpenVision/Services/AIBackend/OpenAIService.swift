@@ -172,8 +172,9 @@ final class OpenAIService: ObservableObject {
                 .joined()
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !reply.isEmpty else { throw OpenAIError.emptyReply }
-            ConversationContext.shared.record(user: text, assistant: reply)
-            onAgentMessage?(reply)
+            let spoken = ChatGPTSubscription.capForSpeech(reply)
+            ConversationContext.shared.record(user: text, assistant: spoken)
+            onAgentMessage?(spoken)
             return
         }
         throw OpenAIError.api("search loop didn't converge")

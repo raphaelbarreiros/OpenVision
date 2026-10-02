@@ -43,11 +43,16 @@ final class OAuthTokenStore: @unchecked Sendable {
         cache[account] = credentials
         loaded.insert(account)
         guard let data = try? JSONEncoder().encode(credentials) else { return }
-        var query = baseQuery(account)
-        SecItemDelete(query as CFDictionary)
-        query[kSecValueData as String] = data
-        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        let status = SecItemAdd(query as CFDictionary, nil)
+        // Update in place (atomic), adding only when there's nothing to update: delete-then-add
+        // would leave no item at all if the add failed.
+        let attributes: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+        ]
+        var status = SecItemUpdate(baseQuery(account) as CFDictionary, attributes as CFDictionary)
+        if status == errSecItemNotFound {
+            status = SecItemAdd(baseQuery(account).merging(attributes) { $1 } as CFDictionary, nil)
+        }
         if status != errSecSuccess { NSLog("[OAuth] keychain save failed for %@: %d", account, status) }
     }
 

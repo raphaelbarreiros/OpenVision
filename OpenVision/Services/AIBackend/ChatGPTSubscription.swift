@@ -92,6 +92,9 @@ enum ChatGPTSubscription {
             // With store:false, reasoning models need their reasoning items echoed back in a tool
             // loop; the encrypted content is what makes that possible.
             "include": ["reasoning.encrypted_content"],
+            // Time to first token dominates a voice turn. (The Codex CLI sends a reasoning object
+            // on every request, and /models lists "low" for every model.)
+            "reasoning": ["effort": "low"],
         ]
         if !tools.isEmpty {
             body["tools"] = tools
@@ -111,6 +114,23 @@ enum ChatGPTSubscription {
         let (items, failure) = parseStream(data)
         if let failure { throw ChatGPTSubscriptionError.api(failure) }
         return items
+    }
+
+    /// Roughly the API-key path's `max_tokens: 400` (~4 characters per token). This backend rejects
+    /// `max_output_tokens` ("Unsupported parameter"), so the cap is applied to the reply instead.
+    static let maxSpokenCharacters = 1600
+
+    /// Cut a reply to `maxSpokenCharacters` at a sentence boundary, so a verbose answer isn't
+    /// spoken in full. The first sentence is always kept, even if it alone is longer.
+    static func capForSpeech(_ reply: String) -> String {
+        guard reply.count > maxSpokenCharacters else { return reply }
+        var kept = ""
+        for sentence in TextChunking.sentences(reply) {
+            let next = kept.isEmpty ? sentence : kept + " " + sentence
+            if next.count > maxSpokenCharacters && !kept.isEmpty { break }
+            kept = next
+        }
+        return kept
     }
 
     /// Output items + the first error message from a Responses SSE body.
@@ -168,9 +188,12 @@ enum ChatGPTSubscription {
                 continue
             }
             guard (200...299).contains(http.statusCode) else {
+                // A 401 that survives a successful forced refresh isn't an expired sign-in (a dead
+                // refresh token already failed with invalid_grant and signed out). It's the backend
+                // refusing this account or request, e.g. a plan without Codex access, so report
+                // what it said instead of "sign-in expired".
                 let detail = errorDetail(data) ?? "HTTP \(http.statusCode)"
                 NSLog("[ChatGPT] request failed: %@", detail)
-                if http.statusCode == 401 { throw OAuthError.authorizationExpired }
                 throw ChatGPTSubscriptionError.api(detail)
             }
             return (data, http)

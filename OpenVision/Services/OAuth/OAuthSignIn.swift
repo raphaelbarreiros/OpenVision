@@ -25,12 +25,15 @@ final class OAuthSignIn: NSObject, ASWebAuthenticationPresentationContextProvidi
 
     private var session: ASWebAuthenticationSession?
 
+    /// An abandoned sheet would otherwise hold the callback port until it's dismissed.
+    private static let deadline: Duration = .seconds(300)
+
     private func run(_ provider: OAuthProvider) async throws -> OAuthCredentials {
         let verifier = PKCE.randomString()
         let state = PKCE.randomString(byteCount: 16)
         let url = OAuthClient.authorizeURL(for: provider, challenge: PKCE.challenge(for: verifier), state: state)
 
-        let server = OAuthLoopbackServer(port: provider.redirectPort, path: provider.redirectPath)
+        let server = OAuthLoopbackServer(port: provider.redirectPort, path: provider.redirectPath, expectedState: state)
         defer {
             server.stop()
             session?.cancel()
@@ -54,6 +57,10 @@ final class OAuthSignIn: NSObject, ASWebAuthenticationPresentationContextProvidi
             self.session = session
             if !session.start() {
                 resume.resume(.failure(OAuthError.provider("couldn't open the sign-in page")))
+            }
+            Task {
+                try? await Task.sleep(for: Self.deadline)
+                resume.resume(.failure(OAuthError.timedOut))   // no-op if already finished
             }
         }
 

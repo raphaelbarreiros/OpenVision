@@ -65,6 +65,32 @@ final class SubscriptionAuthTests: XCTestCase {
         XCTAssertNil(OAuthLoopbackServer.callbackQuery(fromRequest: favicon, expectedPath: "/auth/callback"))
     }
 
+    func testLoopbackOnlyAcceptsOurState() {
+        let ours = Data("GET /auth/callback?code=c1&state=s1 HTTP/1.1\r\n\r\n".utf8)
+        let stray = Data("GET /auth/callback?code=c0&state=old HTTP/1.1\r\n\r\n".utf8)
+        let other = Data("GET /favicon.ico HTTP/1.1\r\n\r\n".utf8)
+        guard case .callback = OAuthLoopbackServer.match(ours, expectedPath: "/auth/callback", expectedState: "s1") else {
+            return XCTFail("our redirect must be delivered")
+        }
+        XCTAssertEqual(OAuthLoopbackServer.match(stray, expectedPath: "/auth/callback", expectedState: "s1"), .wrongState)
+        XCTAssertEqual(OAuthLoopbackServer.match(other, expectedPath: "/auth/callback", expectedState: "s1"), .notCallback)
+    }
+
+    // MARK: - Spoken length
+
+    func testShortRepliesAreNotCapped() {
+        XCTAssertEqual(ChatGPTSubscription.capForSpeech("Short answer."), "Short answer.")
+    }
+
+    func testLongRepliesAreCutAtASentence() {
+        let sentence = String(repeating: "word ", count: 40).trimmingCharacters(in: .whitespaces) + "."
+        let reply = Array(repeating: sentence, count: 20).joined(separator: " ")
+        let capped = ChatGPTSubscription.capForSpeech(reply)
+        XCTAssertLessThanOrEqual(capped.count, ChatGPTSubscription.maxSpokenCharacters)
+        XCTAssertTrue(capped.hasSuffix("."), "cut at a sentence boundary")
+        XCTAssertTrue(reply.hasPrefix(capped))
+    }
+
     // MARK: - Tokens
 
     func testCredentialsApplySkewAndReadAccountId() throws {
@@ -96,6 +122,29 @@ final class SubscriptionAuthTests: XCTestCase {
     func testAccountIdFallsBackToOrganization() {
         XCTAssertEqual(JWT.chatGPTAccountId(idToken: jwt(["organizations": [["id": "org_1"]]]), accessToken: nil), "org_1")
         XCTAssertNil(JWT.chatGPTAccountId(idToken: "not-a-jwt", accessToken: nil))
+    }
+
+    // MARK: - Refresh failures
+
+    func testTokenErrorCodeReadsFlatAndNestedForms() {
+        XCTAssertEqual(OAuthClient.tokenErrorCode(Data(#"{"error":"invalid_grant"}"#.utf8)), "invalid_grant")
+        // OpenAI's token endpoint nests it (shape from the Codex CLI's tests).
+        let nested = #"{"error":{"message":"Your refresh token has already been used.","type":"invalid_request_error","code":"refresh_token_reused"}}"#
+        XCTAssertEqual(OAuthClient.tokenErrorCode(Data(nested.utf8)), "refresh_token_reused")
+        XCTAssertNil(OAuthClient.tokenErrorCode(Data("<html>Unauthorized</html>".utf8)))
+    }
+
+    func testRevokedRefreshSignsOut() {
+        XCTAssertTrue(OAuthClient.isRevoked(status: 400, errorCode: "invalid_grant"))
+        XCTAssertTrue(OAuthClient.isRevoked(status: 401, errorCode: "refresh_token_invalidated"))
+        XCTAssertTrue(OAuthClient.isRevoked(status: 401, errorCode: "token_revoked"), "a 401 with an OAuth error is permanent")
+    }
+
+    func testTransientRefreshFailuresKeepTheSignIn() {
+        XCTAssertFalse(OAuthClient.isRevoked(status: 401, errorCode: nil), "bare 401, e.g. from a proxy")
+        XCTAssertFalse(OAuthClient.isRevoked(status: 401, errorCode: "invalid_client"))
+        XCTAssertFalse(OAuthClient.isRevoked(status: 500, errorCode: "server_error"))
+        XCTAssertFalse(OAuthClient.isRevoked(status: 503, errorCode: nil))
     }
 
     func testFormEncodingEscapesReservedCharacters() {

@@ -15,18 +15,20 @@ final class OAuthLoopbackServer: @unchecked Sendable {
 
     private let port: UInt16
     private let path: String
+    private let expectedState: String
     private let queue = DispatchQueue(label: "openvision.oauth.loopback")
     private var listener: NWListener?
     private var onCallback: (([URLQueryItem]) -> Void)?
     private var delivered = false
 
-    init(port: UInt16, path: String) {
+    init(port: UInt16, path: String, expectedState: String) {
         self.port = port
         self.path = path
+        self.expectedState = expectedState
     }
 
     /// Bind the port and start accepting. `onCallback` fires once, on an internal queue, with the
-    /// query items of the first request whose path matches.
+    /// query items of the first request on the callback path that carries our `state`.
     func start(onCallback: @escaping ([URLQueryItem]) -> Void) throws {
         guard let nwPort = NWEndpoint.Port(rawValue: port) else { throw OAuthError.portUnavailable(port) }
         let parameters = NWParameters.tcp
@@ -80,10 +82,10 @@ final class OAuthLoopbackServer: @unchecked Sendable {
     }
 
     private func respond(to request: Data, on connection: NWConnection) {
-        let query = Self.callbackQuery(fromRequest: request, expectedPath: path)
         let status: String
         let body: String
-        if let query {
+        switch Self.match(request, expectedPath: path, expectedState: expectedState) {
+        case .callback(let query):
             status = "200 OK"
             body = "<html><body style=\"font-family:-apple-system;text-align:center;padding-top:30vh\">"
                 + "<h2>Signed in</h2><p>You can return to OpenVision.</p></body></html>"
@@ -91,13 +93,31 @@ final class OAuthLoopbackServer: @unchecked Sendable {
                 delivered = true
                 onCallback?(query)
             }
-        } else {
+        case .wrongState:
+            // A prefetch or stray navigation must not use up the one-shot slot, or the real
+            // redirect that follows is ignored and the user has to retry.
+            status = "400 Bad Request"
+            body = "This sign-in link doesn't match the current request."
+        case .notCallback:
             status = "404 Not Found"
             body = "Not found"
         }
         let response = "HTTP/1.1 \(status)\r\nContent-Type: text/html; charset=utf-8\r\n"
             + "Content-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
         connection.send(content: Data(response.utf8), completion: .contentProcessed { _ in connection.cancel() })
+    }
+
+    enum Match: Equatable {
+        case callback([URLQueryItem])
+        case wrongState
+        case notCallback
+    }
+
+    /// Classify a request: our callback (path and `state` match), the callback path with some
+    /// other state, or anything else.
+    static func match(_ request: Data, expectedPath: String, expectedState: String) -> Match {
+        guard let query = callbackQuery(fromRequest: request, expectedPath: expectedPath) else { return .notCallback }
+        return query.first { $0.name == "state" }?.value == expectedState ? .callback(query) : .wrongState
     }
 
     /// Query items from an HTTP request whose request-line path is `expectedPath`, else nil.

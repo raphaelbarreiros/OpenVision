@@ -44,6 +44,7 @@ struct OAuthCredentials: Codable, Equatable, Sendable {
 
 enum OAuthError: LocalizedError, Equatable {
     case cancelled
+    case timedOut
     case portUnavailable(UInt16)
     case stateMismatch
     case missingCode
@@ -56,6 +57,7 @@ enum OAuthError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .cancelled: return "Sign-in was cancelled."
+        case .timedOut: return "Sign-in took too long. Try again."
         case .portUnavailable(let port): return "Couldn't open the sign-in callback port (\(port)). Close other apps using it and try again."
         case .stateMismatch: return "Sign-in response didn't match this request. Try again."
         case .missingCode: return "Sign-in didn't return an authorization code."
@@ -73,7 +75,12 @@ enum PKCE {
     /// A high-entropy random string, base64url without padding (RFC 7636 verifier / state).
     static func randomString(byteCount: Int = 32) -> String {
         var bytes = [UInt8](repeating: 0, count: byteCount)
-        _ = SecRandomCopyBytes(kSecRandomDefault, byteCount, &bytes)
+        if SecRandomCopyBytes(kSecRandomDefault, byteCount, &bytes) != errSecSuccess {
+            // Never fall through with zeros: SystemRandomNumberGenerator is also a CSPRNG on Apple
+            // platforms.
+            var generator = SystemRandomNumberGenerator()
+            bytes = (0..<byteCount).map { _ in UInt8.random(in: .min ... .max, using: &generator) }
+        }
         return Data(bytes).base64URLEncoded
     }
 
@@ -179,16 +186,37 @@ enum OAuthClient {
         let (data, response) = try await URLSession.shared.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200...299).contains(status) else {
-            // Token responses can carry credentials — log the status only, never the body.
-            let error = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
-            NSLog("[OAuth] token request failed: HTTP %d (%@)", status, error ?? "-")
-            // Only invalid_grant means the refresh token is dead. A 401 can also be invalid_client
-            // or a proxy with no OAuth body (RFC 6749 §5.2); signing out on those would throw away
-            // a sign-in that still works.
-            if error == "invalid_grant" { throw OAuthError.authorizationExpired }
+            // Token responses can carry credentials, so log the status and error code, never the body.
+            let code = tokenErrorCode(data)
+            NSLog("[OAuth] token request failed: HTTP %d (%@)", status, code ?? "-")
+            if isRevoked(status: status, errorCode: code) { throw OAuthError.authorizationExpired }
             throw OAuthError.tokenRequestFailed(status)
         }
         return data
+    }
+
+    /// Codes that mean the refresh token is dead and only a new sign-in helps: RFC 6749's
+    /// invalid_grant, plus the ones OpenAI's token endpoint returns (the same set the Codex CLI
+    /// treats as permanent).
+    static let revokedErrorCodes: Set<String> = [
+        "invalid_grant", "refresh_token_expired", "refresh_token_reused", "refresh_token_invalidated",
+    ]
+
+    /// The OAuth error code from a token-endpoint error body: RFC 6749's flat `"error": "…"`, or
+    /// OpenAI's nested `"error": {"code": "…"}`.
+    static func tokenErrorCode(_ data: Data) -> String? {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        if let code = json["error"] as? String { return code.lowercased() }
+        return ((json["error"] as? [String: Any])?["code"] as? String)?.lowercased()
+    }
+
+    /// Whether a failed token request means the sign-in is gone. A 401 that carries an OAuth error
+    /// counts (the Codex CLI treats every 401 from OpenAI's endpoint as permanent), except
+    /// invalid_client, which is a configuration problem. A 401 with no OAuth body, e.g. from a
+    /// proxy, stays retryable so a working sign-in isn't thrown away.
+    static func isRevoked(status: Int, errorCode code: String?) -> Bool {
+        if let code, revokedErrorCodes.contains(code) { return true }
+        return status == 401 && code != nil && code != "invalid_client"
     }
 
     /// application/x-www-form-urlencoded with only RFC 3986 unreserved characters left bare —
