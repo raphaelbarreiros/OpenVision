@@ -9,6 +9,7 @@ enum AIBackendType: String, Codable, CaseIterable {
     case geminiLive = "gemini_live"
     case openAI = "openai"
     case grok = "grok"
+    case hermes = "hermes"
     case appleFoundation = "apple_foundation"
     case localGemma = "local_gemma"
 
@@ -18,6 +19,7 @@ enum AIBackendType: String, Codable, CaseIterable {
         case .geminiLive: return "Gemini Live"
         case .openAI: return "OpenAI"
         case .grok: return "Grok"
+        case .hermes: return "Hermes"
         case .appleFoundation: return "Apple Intelligence"
         case .localGemma: return "Local (MLX)"
         }
@@ -33,6 +35,8 @@ enum AIBackendType: String, Codable, CaseIterable {
             return "GPT — cloud text + vision (API key or ChatGPT subscription)"
         case .grok:
             return "xAI Grok — cloud text + vision (API key or SuperGrok)"
+        case .hermes:
+            return "Your Hermes Agent server — its tools, memory and skills"
         case .appleFoundation:
             return "On-device Apple model — private, no download (iOS 26+)"
         case .localGemma:
@@ -46,6 +50,7 @@ enum AIBackendType: String, Codable, CaseIterable {
         case .geminiLive: return "waveform"
         case .openAI: return "sparkles"
         case .grok: return "bolt"
+        case .hermes: return "server.rack"
         case .appleFoundation: return "apple.logo"
         case .localGemma: return "cpu"
         }
@@ -104,6 +109,34 @@ enum GrokAuthMode: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .apiKey: return "key"
         case .superGrok: return "person.crop.circle"
+        }
+    }
+}
+
+/// How the Hermes backend connects.
+enum HermesAuthMode: String, Codable, CaseIterable, Identifiable {
+    /// The OpenAI-compatible API server (API_SERVER_KEY as bearer).
+    case apiKey = "api_key"
+    /// The web UI's username and password (native sign-in), chatting like Hermes Desktop.
+    case password = "password"
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .apiKey: return "API Key"
+        case .password: return "Username & Password"
+        }
+    }
+    /// The trade-off, shown where the choice is made.
+    var summary: String {
+        switch self {
+        case .apiKey: return "Hermes' API server. Stable and documented."
+        case .password: return "Sign in like the web UI. Uses the Desktop app's protocol, which can change between Hermes versions."
+        }
+    }
+    var icon: String {
+        switch self {
+        case .apiKey: return "key"
+        case .password: return "person.crop.circle"
         }
     }
 }
@@ -186,6 +219,26 @@ struct AppSettings: Codable, Equatable {
 
     /// Voice for the Grok speech engine (xAI TTS voice id, e.g. "ara").
     var grokVoice: String = CloudTTSService.grokDefaultVoice
+
+    // MARK: - Hermes Configuration
+
+    /// API key (API server) or the web UI's username and password.
+    var hermesAuthMode: HermesAuthMode = .apiKey
+
+    /// Address of the Hermes web UI (`hermes dashboard`, port 9119 by default), for
+    /// username-and-password sign-in. Tokens live in the Keychain, not here.
+    var hermesDashboardURL: String = ""
+
+    /// OpenVision conversation id → Hermes' stored chat session id (username-and-password
+    /// mode), so each History conversation continues its own Hermes chat across launches.
+    var hermesSessions: [String: String] = [:]
+
+    /// Address of the user's Hermes API server, e.g. "https://hermes.example.com" (the `/v1`
+    /// suffix and a `/p/<profile>` prefix are both accepted).
+    var hermesServerURL: String = ""
+
+    /// The server's API_SERVER_KEY. It grants Hermes' tools, terminal included.
+    var hermesAPIKey: String = ""
 
     // MARK: - Web Search
 
@@ -306,6 +359,17 @@ struct AppSettings: Codable, Equatable {
         }
     }
 
+    /// Whether Hermes is configured (server URL and API key)
+    var isHermesConfigured: Bool {
+        switch hermesAuthMode {
+        case .apiKey:
+            return HermesService.apiBase(from: hermesServerURL) != nil && !hermesAPIKey.isEmpty
+        case .password:
+            guard let base = HermesDashboard.base(from: hermesDashboardURL) else { return false }
+            return OAuthTokenStore.shared.isSignedIn(HermesDashboard.provider(base: base))
+        }
+    }
+
     /// Whether the local Gemma backend is ready (model downloaded)
     var isLocalGemmaConfigured: Bool {
         localGemmaModelReady
@@ -318,6 +382,7 @@ struct AppSettings: Codable, Equatable {
         case .geminiLive: return isGeminiConfigured
         case .openAI: return isOpenAIConfigured
         case .grok: return isGrokConfigured
+        case .hermes: return isHermesConfigured
         case .appleFoundation: return true   // OS-managed; availability checked at connect
         case .localGemma: return isLocalGemmaConfigured
         }

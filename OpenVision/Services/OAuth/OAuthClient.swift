@@ -33,6 +33,18 @@ struct OAuthProvider: Sendable {
     /// Discovered endpoints must be https on this host or a subdomain — the discovery response
     /// decides where tokens get sent, so it isn't trusted blindly.
     var trustedHost: String? = nil
+    /// How the authorize and token endpoints are spoken to.
+    var dialect: Dialect = .oauth2
+    /// Refresh endpoint, when it isn't the token endpoint (Hermes).
+    var refreshURL: URL? = nil
+
+    enum Dialect: Sendable {
+        /// RFC 6749: client_id and scope on authorize, form bodies, relative `expires_in`.
+        case oauth2
+        /// Hermes' native-app endpoints (/auth/native/*): no client_id or scope, JSON bodies
+        /// ({code, code_verifier} / {refresh_token}), absolute `expires_at` in Unix seconds.
+        case hermesNative
+    }
 
     var redirectURI: String { "http://\(redirectHost):\(redirectPort)\(redirectPath)" }
 }
@@ -162,6 +174,15 @@ enum OAuthClient {
 
     static func authorizeURL(for provider: OAuthProvider, challenge: String, state: String) -> URL {
         var components = URLComponents(url: provider.authorizeURL, resolvingAgainstBaseURL: false)!
+        if provider.dialect == .hermesNative {
+            components.queryItems = [
+                URLQueryItem(name: "code_challenge", value: challenge),
+                URLQueryItem(name: "code_challenge_method", value: "S256"),
+                URLQueryItem(name: "redirect_uri", value: provider.redirectURI),
+                URLQueryItem(name: "state", value: state),
+            ]
+            return components.url!
+        }
         var items = [
             URLQueryItem(name: "response_type", value: "code"),
             URLQueryItem(name: "client_id", value: provider.clientId),
@@ -193,6 +214,10 @@ enum OAuthClient {
     // MARK: Token endpoint
 
     static func exchange(code: String, verifier: String, provider: OAuthProvider) async throws -> OAuthCredentials {
+        if provider.dialect == .hermesNative {
+            let data = try await postToken(provider.tokenURL, json: ["code": code, "code_verifier": verifier])
+            return try credentials(from: data, provider: provider, previous: nil)
+        }
         let data = try await postToken(provider.tokenURL, form: [
             "grant_type": "authorization_code",
             "code": code,
@@ -206,6 +231,11 @@ enum OAuthClient {
     static func refresh(_ current: OAuthCredentials, provider: OAuthProvider) async throws -> OAuthCredentials {
         guard !current.refreshToken.isEmpty else { throw OAuthError.authorizationExpired }
         let provider = await resolved(provider)
+        if provider.dialect == .hermesNative {
+            let data = try await postToken(provider.refreshURL ?? provider.tokenURL,
+                                           json: ["refresh_token": current.refreshToken])
+            return try credentials(from: data, provider: provider, previous: current)
+        }
         let data = try await postToken(provider.tokenURL, form: [
             "grant_type": "refresh_token",
             "refresh_token": current.refreshToken,
@@ -222,23 +252,37 @@ enum OAuthClient {
               let access = json["access_token"] as? String, !access.isEmpty else {
             throw OAuthError.noAccessToken
         }
-        let expiresIn = (json["expires_in"] as? NSNumber)?.doubleValue ?? 3600
+        // Absolute expires_at (Hermes, Unix seconds) or relative expires_in (RFC 6749).
+        let expiry: Date
+        if let expiresAt = (json["expires_at"] as? NSNumber)?.doubleValue {
+            expiry = Date(timeIntervalSince1970: expiresAt)
+        } else {
+            expiry = now.addingTimeInterval((json["expires_in"] as? NSNumber)?.doubleValue ?? 3600)
+        }
         let refresh = (json["refresh_token"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         let accountId = JWT.chatGPTAccountId(idToken: json["id_token"] as? String, accessToken: access)
         return OAuthCredentials(
             accessToken: access,
             refreshToken: refresh ?? previous?.refreshToken ?? "",
-            expiresAt: now.addingTimeInterval(expiresIn - provider.refreshSkew),
+            expiresAt: expiry.addingTimeInterval(-provider.refreshSkew),
             accountId: accountId ?? previous?.accountId
         )
     }
 
     private static func postToken(_ url: URL, form: [String: String]) async throws -> Data {
+        try await postToken(url, contentType: "application/x-www-form-urlencoded", body: Data(formEncode(form).utf8))
+    }
+
+    private static func postToken(_ url: URL, json: [String: String]) async throws -> Data {
+        try await postToken(url, contentType: "application/json", body: try JSONSerialization.data(withJSONObject: json))
+    }
+
+    private static func postToken(_ url: URL, contentType: String, body: Data) async throws -> Data {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.httpBody = Data(formEncode(form).utf8)
+        request.httpBody = body
         request.timeoutInterval = 30
 
         let (data, response) = try await URLSession.shared.data(for: request)

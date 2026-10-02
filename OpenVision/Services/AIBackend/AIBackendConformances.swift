@@ -1,7 +1,7 @@
 // OpenVision - AIBackendConformances.swift
-// AIBackend conformances for the six services, in one place so the adapters are easy to audit.
+// AIBackend conformances for the seven services, in one place so the adapters are easy to audit.
 //
-// Four services (OpenClaw, OpenAI, Grok, Gemma) already match the protocol surface and conform for
+// Five services (OpenClaw, OpenAI, Grok, Hermes, Gemma) already match the protocol surface and conform for
 // free; Apple Intelligence and Gemini Live get thin adapters where their native APIs differ.
 
 import Foundation
@@ -24,6 +24,13 @@ extension OpenAIService: AIBackend {
 
 extension GrokService: AIBackend {
     var backendType: AIBackendType { .grok }
+    var supportsImageInput: Bool { true }
+}
+
+// MARK: - Hermes
+
+extension HermesService: AIBackend {
+    var backendType: AIBackendType { .hermes }
     var supportsImageInput: Bool { true }
 }
 

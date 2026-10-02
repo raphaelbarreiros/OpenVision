@@ -11,6 +11,7 @@ OpenVision/
 ├── Services/            One folder per domain — the backbone of the app
 │   ├── AIBackend/       AIBackend protocol + registry + conformances, OpenAIService,
 │   │                    ChatGPTSubscription (ChatGPT plan backend), GrokService,
+│   │                    HermesService (your Hermes Agent server),
 │   │                    CloudChat (prompt + tools + loop shared by cloud chat backends)
 │   ├── AppleFoundation/ Apple Intelligence backend (+ its native Tool wrappers)
 │   ├── Audio/           Audio session, capture, playback, sounds
@@ -78,7 +79,9 @@ whichever backend the user selected through it — no downcasts, no per-backend 
 4. If it should run the productivity tools, wire its function-calling loop to
    `NativeToolRegistry.shared` (see how OpenAI/Gemini do it). An OpenAI-compatible Chat
    Completions API can call `CloudChat.chatCompletionsReply` and get the prompt, history,
-   photos, web search and tools for free; `GrokService` is the smallest example.
+   photos, web search and tools for free; `GrokService` is the smallest example. For an agent
+   that runs its own tools, pass `offerTools: false`, `maxTokens: nil` and its own `system`
+   prompt, as `HermesService` does.
 
 **Adding a native tool:** see [docs/native-tools.md](native-tools.md) — implement `NativeTool`,
 register it, add the Apple `Tool` wrapper, and mention it in the backend prompts.

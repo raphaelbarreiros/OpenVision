@@ -69,6 +69,9 @@ final class VoiceAgentViewModel: ObservableObject {
     /// History: true after a user command was recorded, until its reply is recorded. Keeps
     /// system utterances ("Live video mode active", error prompts) out of the History tab.
     private var historyAwaitingReply = false
+    /// A question put to the user mid-turn (a Hermes approval or clarifying question). The next
+    /// captured utterance answers it instead of starting a new command.
+    private var pendingAnswer: (id: UUID, continuation: CheckedContinuation<String?, Never>)?
     /// History (live modes): last streamed AI turn already recorded, to dedupe turn-complete events.
     private var historyLastLiveReply = ""
 
@@ -222,7 +225,7 @@ final class VoiceAgentViewModel: ObservableObject {
                         await OpenClawService.shared.disconnect()
                     case .geminiLive:
                         await GeminiLiveService.shared.disconnect()
-                    case .openAI, .grok:
+                    case .openAI, .grok, .hermes:
                         break   // stateless HTTP — nothing to disconnect
                     case .appleFoundation:
                         break   // OS-managed — nothing to disconnect
@@ -301,6 +304,10 @@ final class VoiceAgentViewModel: ObservableObject {
                 case .grok:
                     try await GrokService.shared.connect()
                     // Stateless HTTP — photos are captured on-demand like OpenAI.
+
+                case .hermes:
+                    try await HermesService.shared.connect()
+                    // Stateless HTTP to the user's Hermes server — photos on demand like OpenAI.
 
                 case .appleFoundation:
                     try await AppleFoundationService.shared.connect()
@@ -408,7 +415,7 @@ final class VoiceAgentViewModel: ObservableObject {
                 await OpenClawService.shared.disconnect()
             case .geminiLive:
                 await GeminiLiveService.shared.disconnect()
-            case .openAI, .grok:
+            case .openAI, .grok, .hermes:
                 break   // stateless HTTP — nothing to disconnect
             case .appleFoundation:
                 break   // OS-managed — nothing to disconnect
@@ -469,6 +476,7 @@ final class VoiceAgentViewModel: ObservableObject {
             case .openClaw: await OpenClawService.shared.interrupt()
             case .geminiLive: await GeminiLiveService.shared.interrupt()
             case .openAI, .grok: break   // single request/response — nothing to interrupt
+            case .hermes: await HermesGatewayClient.shared.interrupt()   // no-op in API-key mode
             case .appleFoundation: AppleFoundationService.shared.interrupt()
             case .localGemma: GemmaLocalService.shared.interrupt()
             }
@@ -586,6 +594,10 @@ final class VoiceAgentViewModel: ObservableObject {
             self?.performFullStop()
         }
 
+        HermesGatewayClient.shared.askUser = { [weak self] prompt in
+            await self?.askUser(prompt)
+        }
+
         // Command captured
         voiceCommandService.onCommandCaptured = { [weak self] (command: String) in
             guard let self else { return }
@@ -595,6 +607,14 @@ final class VoiceAgentViewModel: ObservableObject {
             // This prevents processing stale commands after session ends
             guard self.isSessionActive else {
                 print("[VoiceAgent] Ignoring command - session not active")
+                return
+            }
+
+            // An answer to a question the agent asked mid-turn, not a new command.
+            if let pending = self.pendingAnswer {
+                self.pendingAnswer = nil
+                self.userTranscript = command
+                pending.continuation.resume(returning: command)
                 return
             }
 
@@ -653,6 +673,8 @@ final class VoiceAgentViewModel: ObservableObject {
                     await GeminiLiveService.shared.interrupt()
                 case .openAI, .grok:
                     break   // single request/response — nothing to interrupt
+                case .hermes:
+                    await HermesGatewayClient.shared.interrupt()   // no-op in API-key mode
                 case .appleFoundation:
                     AppleFoundationService.shared.interrupt()
                 case .localGemma:
@@ -969,9 +991,9 @@ final class VoiceAgentViewModel: ObservableObject {
             } else {
                 try await backend.sendMessage(command, imageData: nil)
             }
-            // OpenAI and Grok are plain request/response with no session to keep "thinking" alive —
+            // OpenAI, Grok and Hermes are plain request/response with no session to keep "thinking" alive —
             // restore the listening state inline. The others restore via their callbacks.
-            if backend.backendType == .openAI || backend.backendType == .grok {
+            if [.openAI, .grok, .hermes].contains(backend.backendType) {
                 agentState = isSessionActive ? .listening : .idle
             }
         } catch {
@@ -1638,6 +1660,11 @@ final class VoiceAgentViewModel: ObservableObject {
             while s.hasPrefix(prefix) { s = String(s.dropFirst(prefix.count)) }
         }
         s = s.trimmingCharacters(in: CharacterSet(charactersIn: " ,.?!"))
+        // Hermes is a full agent: the coaching below is for small vision models and would just
+        // show up in the user's Hermes chat, so send the user's own question.
+        if settingsManager.settings.aiBackend == .hermes {
+            return s.count < 3 ? "What is this?" : s.prefix(1).uppercased() + s.dropFirst()
+        }
         if s.count < 3 {
             return "What is the main object in this image? Name it specifically and describe its key visible details in 2–3 sentences."
         }
@@ -2109,6 +2136,34 @@ final class VoiceAgentViewModel: ObservableObject {
             Task { await neuralTTS.speak(text) }
         } else {
             ttsService.speak(text)
+        }
+    }
+
+    // MARK: - Mid-turn questions
+
+    /// Put a question to the user while a turn is still running (Hermes approvals and clarifying
+    /// questions): speak it, then return the next thing they say, or nil after a minute. Spoken
+    /// directly rather than through speakResponse, so it isn't recorded as the turn's answer.
+    func askUser(_ prompt: String) async -> String? {
+        if let previous = pendingAnswer {
+            pendingAnswer = nil
+            previous.continuation.resume(returning: nil)
+        }
+        if let neuralTTS {
+            Task { await neuralTTS.speak(prompt) }
+        } else {
+            ttsService.speak(prompt)
+        }
+        let id = UUID()
+        return await withCheckedContinuation { continuation in
+            pendingAnswer = (id, continuation)
+            Task {
+                try? await Task.sleep(for: .seconds(60))
+                if let pending = self.pendingAnswer, pending.id == id {
+                    self.pendingAnswer = nil
+                    pending.continuation.resume(returning: nil)
+                }
+            }
         }
     }
 

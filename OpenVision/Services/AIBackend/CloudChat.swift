@@ -13,11 +13,18 @@ enum CloudChat {
 
     /// Runs the Chat Completions loop for one user turn and returns the spoken reply. `send`
     /// performs a single POST of the given JSON body and returns the raw response.
+    ///
+    /// The defaults are for a plain model (OpenAI, Grok): OpenVision's prompt and tools, and a
+    /// 400-token cap. An agent that runs its own tools (Hermes) passes its own `system` prompt,
+    /// `offerTools: false` and `maxTokens: nil`, so the agent isn't cut off mid-task.
     static func chatCompletionsReply(
         text: String,
         imageData: Data?,
         model: String,
         label: String,
+        system: String? = nil,
+        offerTools: Bool = true,
+        maxTokens: Int? = 400,
         send: (Data) async throws -> (Data, URLResponse)
     ) async throws -> String {
         // Build the user content: plain string for text-only, or the multimodal array with an
@@ -34,7 +41,7 @@ enum CloudChat {
         }
 
         var messages: [[String: Any]] = []
-        let system = systemPrompt()
+        let system = system ?? systemPrompt()
         if !system.isEmpty {
             messages.append(["role": "system", "content": system])
         }
@@ -53,12 +60,12 @@ enum CloudChat {
 
         let maxIterations = 4
         for _ in 0..<maxIterations {
-            let body: [String: Any] = [
+            var body: [String: Any] = [
                 "model": model,
                 "messages": messages,
-                "tools": tools,
-                "max_tokens": 400
             ]
+            if offerTools { body["tools"] = tools }
+            if let maxTokens { body["max_tokens"] = maxTokens }
             let (data, response) = try await send(try JSONSerialization.data(withJSONObject: body))
             guard let http = response as? HTTPURLResponse else { throw CloudChatError.noResponse(label) }
             guard (200...299).contains(http.statusCode) else {

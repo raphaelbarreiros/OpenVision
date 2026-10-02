@@ -89,6 +89,16 @@ struct AIBackendSettingsView: View {
                 }
 
                 NavigationLink {
+                    HermesSettingsView()
+                } label: {
+                    HStack {
+                        Label("Hermes Settings", systemImage: "server.rack")
+                        Spacer()
+                        configurationBadge(configured: settingsManager.settings.isHermesConfigured)
+                    }
+                }
+
+                NavigationLink {
                     AppleIntelligenceSettingsView()
                 } label: {
                     HStack {

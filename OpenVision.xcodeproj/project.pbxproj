@@ -12,9 +12,11 @@
 		0D8C225C70FFE36DD531EBB3 /* InfluxMetricsSink.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1C42DAF5F3F6F1D6E183B1D /* InfluxMetricsSink.swift */; };
 		1339DF5D7DB28F0048D95846 /* WebSearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44D24962AB43639AF3B59662 /* WebSearchService.swift */; };
 		186FD72F369F1962B15EB858 /* OpenClawService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C539AB340611B1A6CCC50F17 /* OpenClawService.swift */; };
+		1C2046574C1A77D953BC6D4F /* HermesSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6102B753E2737E698B780C8E /* HermesSettingsView.swift */; };
 		1D0AEF3C7A810FF410C8F2E5 /* SessionRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06B8E5499FB1BA51EF6F1741 /* SessionRecorder.swift */; };
 		1EEA4B0E379A76881244FAB9 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DE51DA812A9394A5064F60E /* SettingsView.swift */; };
 		223474C328BCC3C81ADCB93D /* OpenAIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFDF4A693D2CEB248757FBD3 /* OpenAIService.swift */; };
+		2241E9878F41D5D5856C9502 /* HermesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 641FA355FB2C0B37F5575730 /* HermesTests.swift */; };
 		23D894B8F06FA0DBE93C658B /* NeuralSpeech.swift in Sources */ = {isa = PBXBuildFile; fileRef = A82F52D647139EC398E043BF /* NeuralSpeech.swift */; };
 		2947D6E5D6D5B7080C53D478 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C27052ECD2FFC79652B5CDB3 /* OnboardingView.swift */; };
 		29F56C03229677BC1F157CEC /* HapticFeedback.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAD745CF110FC8C25A5B34D8 /* HapticFeedback.swift */; };
@@ -31,6 +33,7 @@
 		3A3AC3A91A768EAE0B643B95 /* VoiceSelectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1FEE8399255B598700D2F1F /* VoiceSelectionView.swift */; };
 		3CEB0ABE3CA96726C9FC7C3F /* AppleIntelligenceSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BDBCEE6B3B8DF551525A4DA /* AppleIntelligenceSettingsView.swift */; };
 		3D871EEF1178A47F4999C7F2 /* AdditionalInstructionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 516A0726470BFA8BD9B55F3F /* AdditionalInstructionsView.swift */; };
+		3F1BDD85ED6BBA11FD6829BF /* HermesService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDE95D6F288A9539CB1335B2 /* HermesService.swift */; };
 		408073C736E7EB74442648EF /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = 0DB70D0CA14C70A3B9547241 /* MLXLLM */; };
 		41DD47E61F53A95E861466C1 /* GrokTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A5609ACD2D7FE78F322E775 /* GrokTests.swift */; };
 		4311DE5A0DB995611DB30A1A /* MetricsCollector+Configuration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 669EB2820345D230AB0F9FAC /* MetricsCollector+Configuration.swift */; };
@@ -116,6 +119,7 @@
 		F6489F185DBE88FE282819D1 /* DocumentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAF763EF8FCBF8EC57D8B943 /* DocumentStore.swift */; };
 		F7718545E4E6BB4A7773B564 /* SettingsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADC230E2AE44E5132DC5AB01 /* SettingsManager.swift */; };
 		F7AB848D2FF4A3A019358670 /* CloudChat.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6327DA000918E311DF6E9B8 /* CloudChat.swift */; };
+		F7B70D8A815C84149A038294 /* HermesGateway.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B7B8054D97114E3269E13EC /* HermesGateway.swift */; };
 		FCA8B46A222A0C469FF7873B /* KokoroTTSService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE848862D72446F7BBDD3D89 /* KokoroTTSService.swift */; };
 		FCFECBF332943E64812DC931 /* AIBackendSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57A8327E5265287A0C89DE3D /* AIBackendSettingsView.swift */; };
 		FED4796E980F43C3C55F04B0 /* GrokService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2D074291D5EC56FE593A962 /* GrokService.swift */; };
@@ -172,7 +176,9 @@
 		601D21AA8114E457F40C6C4A /* VoiceAgentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAgentView.swift; sourceTree = "<group>"; };
 		605D6841BA373D249632606F /* TimerTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerTool.swift; sourceTree = "<group>"; };
 		60E2210A5A20177647BDB5AD /* Config.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Config.swift; sourceTree = "<group>"; };
+		6102B753E2737E698B780C8E /* HermesSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermesSettingsView.swift; sourceTree = "<group>"; };
 		6188DD26571BACB30096654D /* Conversation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Conversation.swift; sourceTree = "<group>"; };
+		641FA355FB2C0B37F5575730 /* HermesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermesTests.swift; sourceTree = "<group>"; };
 		669EB2820345D230AB0F9FAC /* MetricsCollector+Configuration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MetricsCollector+Configuration.swift"; sourceTree = "<group>"; };
 		6BD412B34D09394FE85F0181 /* NeuralVoiceListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeuralVoiceListView.swift; sourceTree = "<group>"; };
 		6D80EDF3FFC20786ED7F6654 /* FaceRecognitionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaceRecognitionService.swift; sourceTree = "<group>"; };
@@ -185,6 +191,7 @@
 		83CCAB822E3A2D55FB3C338A /* CalendarTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarTool.swift; sourceTree = "<group>"; };
 		856B3530E83149C3CA2D2246 /* DocumentChunking.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentChunking.swift; sourceTree = "<group>"; };
 		8601201988376029090B1EAA /* OpenVision.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = OpenVision.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		8B7B8054D97114E3269E13EC /* HermesGateway.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermesGateway.swift; sourceTree = "<group>"; };
 		8D8637C15D8F2B68599FA38D /* OpenVision.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = OpenVision.entitlements; sourceTree = "<group>"; };
 		8DD25C635E9A37E7D6CA7677 /* GlassesManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassesManager.swift; sourceTree = "<group>"; };
 		95A0370E2CC3E1D597DFC3E6 /* MetricsCollector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetricsCollector.swift; sourceTree = "<group>"; };
@@ -233,6 +240,7 @@
 		DA6DC62CBCB893C9A9922686 /* NativeTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeTool.swift; sourceTree = "<group>"; };
 		DAF763EF8FCBF8EC57D8B943 /* DocumentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentStore.swift; sourceTree = "<group>"; };
 		DD3DFE96152AAE9145F104D6 /* LocalAgentRouteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalAgentRouteTests.swift; sourceTree = "<group>"; };
+		DDE95D6F288A9539CB1335B2 /* HermesService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermesService.swift; sourceTree = "<group>"; };
 		DFBB8B07B4970CA5F63B3B2A /* GemmaLocalService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GemmaLocalService.swift; sourceTree = "<group>"; };
 		E1C42DAF5F3F6F1D6E183B1D /* InfluxMetricsSink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InfluxMetricsSink.swift; sourceTree = "<group>"; };
 		E553EFA930E3B93EEA8F0AB6 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -278,6 +286,7 @@
 				C1BFC8380B5BDA0778E04EAB /* GemmaSettingsView.swift */,
 				ED25EC5E800C216965A50F8A /* GlassesSettingsView.swift */,
 				179C0876BB1891478A806702 /* GrokSettingsView.swift */,
+				6102B753E2737E698B780C8E /* HermesSettingsView.swift */,
 				4F363A639A7050AFBDFAF486 /* KokoroSettingsView.swift */,
 				484468B5604EFF4051074762 /* MemoriesView.swift */,
 				6BD412B34D09394FE85F0181 /* NeuralVoiceListView.swift */,
@@ -640,6 +649,8 @@
 				C6625D7D26F2BE670A31997A /* ChatGPTSubscription.swift */,
 				E6327DA000918E311DF6E9B8 /* CloudChat.swift */,
 				D2D074291D5EC56FE593A962 /* GrokService.swift */,
+				8B7B8054D97114E3269E13EC /* HermesGateway.swift */,
+				DDE95D6F288A9539CB1335B2 /* HermesService.swift */,
 				FFDF4A693D2CEB248757FBD3 /* OpenAIService.swift */,
 			);
 			path = AIBackend;
@@ -651,6 +662,7 @@
 				39552315579536D518404FED /* DocumentChunkingTests.swift */,
 				B88E1A3CDAF6C7B3D7DF36FE /* FrameChangeTests.swift */,
 				3A5609ACD2D7FE78F322E775 /* GrokTests.swift */,
+				641FA355FB2C0B37F5575730 /* HermesTests.swift */,
 				DD3DFE96152AAE9145F104D6 /* LocalAgentRouteTests.swift */,
 				BE4D7E31C137C29246EB9281 /* NativeToolSupportTests.swift */,
 				E7752EDE12666E6361064A9F /* SubscriptionAuthTests.swift */,
@@ -824,6 +836,7 @@
 				E9628B20FB4654FBBFC61EF9 /* DocumentChunkingTests.swift in Sources */,
 				9A7811CF026E8DF74F74C2A2 /* FrameChangeTests.swift in Sources */,
 				41DD47E61F53A95E861466C1 /* GrokTests.swift in Sources */,
+				2241E9878F41D5D5856C9502 /* HermesTests.swift in Sources */,
 				DC6776A7CBFBB8E151FB6B85 /* LocalAgentRouteTests.swift in Sources */,
 				5F19226406CF5B705B57BACF /* NativeToolSupportTests.swift in Sources */,
 				5A0CE2F7458D3C9E63627724 /* SubscriptionAuthTests.swift in Sources */,
@@ -878,6 +891,9 @@
 				FED4796E980F43C3C55F04B0 /* GrokService.swift in Sources */,
 				91FCB6DAB24AAC4CC4CA9A47 /* GrokSettingsView.swift in Sources */,
 				29F56C03229677BC1F157CEC /* HapticFeedback.swift in Sources */,
+				F7B70D8A815C84149A038294 /* HermesGateway.swift in Sources */,
+				3F1BDD85ED6BBA11FD6829BF /* HermesService.swift in Sources */,
+				1C2046574C1A77D953BC6D4F /* HermesSettingsView.swift in Sources */,
 				0D8C225C70FFE36DD531EBB3 /* InfluxMetricsSink.swift in Sources */,
 				8351C940EEB51503B73F3449 /* KokoroSettingsView.swift in Sources */,
 				FCA8B46A222A0C469FF7873B /* KokoroTTSService.swift in Sources */,
