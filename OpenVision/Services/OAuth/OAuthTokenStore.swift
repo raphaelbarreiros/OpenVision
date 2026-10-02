@@ -34,8 +34,14 @@ final class OAuthTokenStore: @unchecked Sendable {
         credentials(for: provider) != nil
     }
 
+    /// Store a new sign-in. Any refresh still in flight belongs to the previous session: drop it,
+    /// so its result can't overwrite these credentials or sign them out.
     func save(_ credentials: OAuthCredentials, for provider: OAuthProvider) {
-        lock.withLock { storeLocked(credentials, account: provider.id) }
+        lock.withLock {
+            refreshes[provider.id]?.cancel()
+            refreshes[provider.id] = nil
+            storeLocked(credentials, account: provider.id)
+        }
     }
 
     /// Cache + Keychain write. Caller holds `lock`.
@@ -129,13 +135,20 @@ final class OAuthTokenStore: @unchecked Sendable {
     /// Cache-through Keychain read. Caller holds `lock`.
     private func cachedLocked(_ account: String) -> OAuthCredentials? {
         if loaded.contains(account) { return cache[account] }
-        loaded.insert(account)
         var query = baseQuery(account)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: AnyObject?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data,
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        // Only a definitive answer is cached. A transient error, e.g. errSecInteractionNotAllowed
+        // when the app is relaunched in the background before first unlock, must be retried
+        // later instead of reporting a still-valid sign-in as signed out for the whole session.
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            NSLog("[OAuth] keychain read for %@ failed: %d (will retry)", account, status)
+            return nil
+        }
+        loaded.insert(account)
+        guard let data = result as? Data,
               let credentials = try? JSONDecoder().decode(OAuthCredentials.self, from: data) else {
             return nil
         }

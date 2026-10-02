@@ -43,7 +43,10 @@ final class OAuthSignIn: NSObject, ASWebAuthenticationPresentationContextProvidi
         let query: [URLQueryItem] = try await withCheckedThrowingContinuation { continuation in
             let resume = ResumeOnce(continuation)
             do {
-                try server.start { query in resume.resume(.success(query)) }
+                try server.start(
+                    onCallback: { query in resume.resume(.success(query)) },
+                    onFailure: { error in resume.resume(.failure(error)) }
+                )
             } catch {
                 resume.resume(.failure(error))
                 return
