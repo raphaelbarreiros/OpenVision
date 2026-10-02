@@ -55,7 +55,7 @@
 - **Gemini Live**: Real-time voice + vision with native audio streaming
 - **OpenAI**: GPT-4o text + vision over the Chat Completions API — works with any **OpenAI-compatible** endpoint (OpenRouter, Groq, local servers, etc.). Also drives **live video** via the **Realtime API** (`gpt-realtime`) — continuous voice + camera frames (see below). No API key? **Sign in with your ChatGPT subscription** instead (text + photos; live video needs a key).
 - **Grok**: xAI Grok text + vision over xAI's API, with an xAI API key or by **signing in with your SuperGrok subscription**. Same web search and productivity tools as OpenAI.
-- **Hermes**: your own [Hermes Agent](https://github.com/NousResearch/hermes-agent) server, reached over the internet through its OpenAI-compatible API server. Hermes answers with its own tools, memory and skills, and sees photos from the glasses.
+- **Hermes**: your own [Hermes Agent](https://github.com/NousResearch/hermes-agent) server, reached over the internet with its API key or by **signing in to its web UI with your username and password**. Hermes answers with its own tools, memory and skills, sees photos from the glasses, asks before risky commands (you answer yes or no), and runs its **slash commands by voice**.
 
 ### Live Video — Real-Time Voice + Vision
 Say **"Ok Vision, start video stream"** to enter a live mode where the glasses camera stays on and the AI answers questions about what you're seeing. Ask freely — no wake word between questions — until you say **"stop video"**. Live video routes to whichever backend you've selected:
@@ -66,24 +66,26 @@ Say **"Ok Vision, start video stream"** to enter a live mode where the glasses c
 ### On-Device Photos (SmolVLM2)
 With **SmolVLM2** selected as your local model, **"Ok Vision, take a photo and tell me what this is"** captures a frame from the glasses and answers **entirely on-device** — nothing leaves the phone. Other local models stay text-only and hand camera questions to a cloud backend. (Images are resized on-device to keep the vision encoder within iOS memory limits.)
 
-### On-Device Neural Voice (Kokoro)
-- A **natural, offline, private voice** (Kokoro-82M) running on-device via MLX — selectable from a Speech Engine dropdown with a voice picker.
-- Apple's system voice stays the default (with Premium/Enhanced voice support); Kokoro is the upgrade when you want lifelike speech with **nothing leaving the phone**.
+### Natural Voices — On-Device or Cloud
+- **Kokoro**: a **natural, offline, private voice** (Kokoro-82M) running on-device via MLX.
+- **Grok** (xAI, 28 multilingual voices) and **OpenAI** (`gpt-4o-mini-tts`, 13 voices) cloud voices. Grok works with your SuperGrok sign-in or an xAI key; OpenAI needs an API key with credits.
+- Pick one from the Speech Engine dropdown; every voice list has a ▶ button to hear a sample before choosing.
+- Apple's system voice stays the default (with Premium/Enhanced voice support).
 
 ### Agentic Web Search — Real Live Information
 - The models **search the web whenever they're unsure or asked about current things** — news, weather, prices, scores — and never answer "I can't access real-time data" without trying.
 - **Tavily** (free tier) returns real live content for the model to summarize; **DuckDuckGo** is the keyless fallback.
-- Smart flow: local models **reformulate + retry** a weak query; the OpenAI backend runs a real **function-calling loop** (call `web_search` → refine → answer).
+- Smart flow: local models **reformulate + retry** a weak query; the OpenAI and Grok backends run a real **function-calling loop** (call `web_search` → refine → answer).
 
 ### Conversation Memory
-- Multi-turn context on the on-device and OpenAI backends: *"What's the capital of France?"* → *"What's **its** population?"* just works.
+- Multi-turn context on the on-device, OpenAI and Grok backends (Hermes keeps one chat per conversation): *"What's the capital of France?"* → *"What's **its** population?"* just works.
 - Bounded per session so local memory stays safe; Apple keeps context via a reused native session.
 
 ### Hands-Free Productivity Tools
 - Run real actions by voice: **timers**, **Pomodoro** sessions, **reminders** (Apple Reminders), **calendar** events (read today/upcoming, add), **notes** (auto-tagged with place + time), and **copy to clipboard**.
 - Built on stable Apple frameworks (EventKit, UserNotifications, CoreLocation, UIPasteboard) — deterministic, no hallucination surface.
 - **Pixel-perfect times:** the *tool* does the date math, not the model. Say *"remind me at 6 PM"* and it lands at exactly 6:00 PM — even on the tiny on-device model.
-- One tool registry, **four backends**: OpenAI and Gemini Live (function-calling), Apple Intelligence (`Tool` protocol), and on-device Gemma 4 (JSON tool-calls) all share the same tools.
+- One tool registry, **five backends**: OpenAI, Grok and Gemini Live (function-calling), Apple Intelligence (`Tool` protocol), and on-device Gemma 4 (JSON tool-calls) all share the same tools. (Hermes and OpenClaw bring their own.)
 - See [docs/native-tools.md](docs/native-tools.md) for the full design.
 
 ### On-Device Face Recognition (Apple Vision)
@@ -130,7 +132,7 @@ With **SmolVLM2** selected as your local model, **"Ok Vision, take a photo and t
 |--------|-------------|
 | **Voice Assistant** | Tap the orb or say "Ok Vision" — live transcripts, distinct listening/thinking/speaking states |
 | **Settings** | Configure AI backend, web search, glasses, voice control, and advanced options |
-| **AI Backends** | Choose Local (MLX), Apple Intelligence (on-device), OpenClaw (tools), Gemini Live (low latency), or OpenAI |
+| **AI Backends** | Choose Local (MLX), Apple Intelligence (on-device), OpenClaw (tools), Gemini Live (low latency), OpenAI, Grok, or Hermes |
 | **Local Models** | Download and manage on-device models (Qwen, Gemma, SmolVLM2, FastVLM) with real sizes and one-tap switching |
 
 ---
@@ -148,7 +150,9 @@ With **SmolVLM2** selected as your local model, **"Ok Vision, take a photo and t
   - **Apple Intelligence** — no key or download; needs iOS 26+ on an Apple-Intelligence device (iPhone 15 Pro and newer)
   - [OpenClaw](https://github.com/openclaw/openclaw) instance
   - [Gemini API key](https://aistudio.google.com/app/apikey)
-  - [OpenAI API key](https://platform.openai.com/api-keys) (or any OpenAI-compatible endpoint)
+  - [OpenAI API key](https://platform.openai.com/api-keys) (or any OpenAI-compatible endpoint), or a ChatGPT Plus/Pro subscription
+  - A SuperGrok subscription or [xAI API key](https://console.x.ai)
+  - A [Hermes Agent](https://github.com/NousResearch/hermes-agent) server
 
 ### Step 1: Clone & Configure
 
@@ -304,6 +308,8 @@ You: "Ok Vision, take a photo and tell me what this is"
 | "Note that I parked in lot B" / "Search my notes for parking" | Notes, auto-tagged with place + time |
 | "Start video stream" | Enter live video mode (Gemini / OpenAI Realtime / on-device SmolVLM2) |
 | "Stop video" | Exit live video mode |
+| "Slash usage" / "Slash model GPT five point five" | Run a Hermes slash command or skill (Hermes, username & password) |
+| "Yes" / "No" | Answer when Hermes asks before a risky command |
 
 > Commands are routed by the on-device model, so you don't need exact wording — natural phrasing works, and it searches the web on its own when it doesn't know.
 
@@ -317,7 +323,9 @@ You: "Ok Vision, take a photo and tell me what this is"
 | **Apple Intelligence** | Wake word + Apple STT | via a cloud backend | Free · **on-device, no download** | Private chat on iOS 26+ devices, lowest setup |
 | **OpenClaw** | Wake word + Apple STT | Photo on request | Self-hosted | Tasks, 56+ tools, control |
 | **Gemini Live** | Native VAD (always on) | Continuous 1fps video | Cloud API | Natural, low-latency conversation |
-| **OpenAI** | Wake word + Apple STT · Realtime VAD in live mode | Photo on request (GPT-4o) · **live video (Realtime `gpt-realtime`)** | Cloud API · OpenAI-compatible | Cloud text + vision, live video, cross-checking |
+| **OpenAI** | Wake word + Apple STT · Realtime VAD in live mode | Photo on request (GPT-4o) · **live video (Realtime `gpt-realtime`)** | Cloud API · OpenAI-compatible · or ChatGPT subscription | Cloud text + vision, live video, cross-checking |
+| **Grok** | Wake word + Apple STT | Photo on request | Cloud API · or SuperGrok subscription | Fast cloud answers; pairs with the Grok voice |
+| **Hermes** | Wake word + Apple STT | Photo on request | Self-hosted | Real work on your server: its tools, memory, skills and slash commands |
 
 Face recognition, web search, and conversation memory all run on the **on-device** backends (Gemma, Apple) — private, no photos or queries leave your phone unless you pick a cloud backend. With **SmolVLM2**, photo Q&A and live video are on-device too.
 
@@ -328,14 +336,16 @@ Face recognition, web search, and conversation memory all run on the **on-device
 ### AI Section
 | Setting | Description |
 |---------|-------------|
-| **AI Backend** | Choose Local (MLX), Apple Intelligence, OpenClaw, Gemini Live, or OpenAI |
+| **AI Backend** | Choose Local (MLX), Apple Intelligence, OpenClaw, Gemini Live, OpenAI, Grok, or Hermes |
 | **Local (MLX)** | Pick a model (Bonsai 8B, Qwen 2.5, Gemma, SmolVLM), download it, or **delete to reclaim storage**. **Bonsai 8B** is an 8B model in 1.28 GB; **SmolVLM2** adds on-device photo + live video |
 | **Apple Intelligence** | On-device model status (no key or download needed; iOS 26+) |
 | **Web Search** | **Tavily** key for real live results (news/prices/scores); DuckDuckGo fallback |
 | **OpenClaw Gateway** | WebSocket URL (e.g., `wss://localhost:18789`) |
 | **OpenClaw Token** | Authentication token |
 | **Gemini API Key** | Google API key |
-| **OpenAI** | API key, chat model (default `gpt-4o-mini`), base URL (OpenAI-compatible), and realtime model (default `gpt-realtime`) for live video |
+| **OpenAI** | API key, chat model (default `gpt-4o-mini`), base URL (OpenAI-compatible), and realtime model (default `gpt-realtime`) for live video; or **Sign in with ChatGPT** and pick a model from your plan |
+| **Grok** | xAI API key or **Sign in with SuperGrok**, and a model (default `grok-4.20-non-reasoning`) |
+| **Hermes** | API server address + key, or the web UI address and **Sign in to Hermes** |
 | **Custom Instructions** | Additional system prompt |
 | **Memories** | Key-value context for AI |
 
@@ -346,6 +356,7 @@ Face recognition, web search, and conversation memory all run on the **on-device
 | **Wake Word Enabled** | Toggle wake word requirement |
 | **Activation Sound** | Play chime on wake word |
 | **Conversation Timeout** | Auto-end after silence (15s-2min) |
+| **Speech Engine** | Apple, Kokoro (on-device), Grok or OpenAI (cloud), each with a voice list and ▶ previews |
 
 ### Hardware Section
 | Setting | Description |
@@ -372,13 +383,17 @@ Face recognition, web search, and conversation memory all run on the **on-device
 │  Services                                                       │
 │  ├── OpenClawService     WebSocket client, auto-reconnect       │
 │  ├── GeminiLiveService   Native audio/video WebSocket           │
-│  ├── OpenAIService       Chat Completions + web_search loop     │
+│  ├── CloudChat           Shared prompt, tools + tool loop       │
+│  ├── OpenAIService       API key or ChatGPT subscription        │
 │  ├── OpenAIRealtimeService  Live voice + video (gpt-realtime)   │
+│  ├── GrokService         xAI API (key or SuperGrok)             │
+│  ├── HermesService       Hermes API server or web UI gateway    │
 │  ├── GemmaLocalService   On-device MLX models (LLM + VLM)       │
 │  ├── AppleFoundationService  Apple Intelligence (iOS 26 model)  │
 │  ├── LocalAgent          Shared agentic routing + conversation  │
 │  ├── WebSearchService    Web search (Tavily + DuckDuckGo)       │
 │  ├── KokoroTTSService    On-device neural voice (Kokoro/MLX)    │
+│  ├── CloudTTSService     Grok and OpenAI cloud voices           │
 │  ├── FaceRecognitionService  On-device faces (Apple Vision)     │
 │  ├── VoiceCommandService Wake word detection, Apple STT         │
 │  ├── TTSService          Apple text-to-speech                   │
