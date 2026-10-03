@@ -36,6 +36,8 @@ final class SettingsManager: ObservableObject {
     private var unreadableSecrets: Set<String> = []
     /// Secrets whose Keychain write failed: kept in settings.json rather than lost.
     private var secretsKeptInFile: Set<String> = []
+    /// Unreadable secrets the user reset: deleted, not restored, once the Keychain can be read.
+    private var secretsToClear: Set<String> = []
 
     // MARK: - Callbacks
 
@@ -78,6 +80,7 @@ final class SettingsManager: ObservableObject {
 
     /// Reset settings to defaults
     func resetToDefaults() {
+        secretsToClear = unreadableSecrets
         settings = AppSettings()
         saveNow()
     }
@@ -143,14 +146,22 @@ final class SettingsManager: ObservableObject {
                     continue
                 case .value(let stored):
                     storedSecrets[account] = stored
-                    if settings[keyPath: keyPath].isEmpty { settings[keyPath: keyPath] = stored }
+                    // Reset since launch: the write below deletes it instead.
+                    if settings[keyPath: keyPath].isEmpty && !secretsToClear.contains(account) {
+                        settings[keyPath: keyPath] = stored
+                    }
                 case .none:
                     break
                 }
                 unreadableSecrets.remove(account)
+                secretsToClear.remove(account)
             }
             let value = settings[keyPath: keyPath]
-            guard storedSecrets[account, default: ""] != value else { continue }
+            guard storedSecrets[account, default: ""] != value else {
+                // The Keychain already has it (e.g. changed back after a failed write).
+                secretsKeptInFile.remove(account)
+                continue
+            }
             if SettingsSecrets.write(value, account: account) {
                 storedSecrets[account] = value
                 secretsKeptInFile.remove(account)
