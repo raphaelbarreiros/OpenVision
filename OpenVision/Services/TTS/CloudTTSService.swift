@@ -60,6 +60,8 @@ final class CloudTTSService: ObservableObject {
     private var appleForRest = false
     /// Test hook: each sentence as it starts playing, and whether it's in the Apple voice.
     var onSentenceStarted: ((_ sentence: String, _ appleVoice: Bool) -> Void)?
+    /// Test hook: how many sentences the Apple voice has actually been asked to speak.
+    var fallbackUtterances: Int { fallback.utterances }
 
     init(provider: CloudVoiceProvider) {
         self.provider = provider
@@ -184,10 +186,14 @@ final class CloudTTSService: ObservableObject {
                 // only play the clip if it's still the head of the CURRENT utterance.
                 guard self.clipQueue.first?.clip == head.clip, !self.utteranceCancelled else { continue }
                 self.clipQueue.removeFirst()
+                let useCloud = clip != nil && !self.appleForRest
+                // Count the failure before refilling the queue, so a second failure in a row
+                // keeps the next sentence from being sent to the cloud.
+                if useCloud { self.consecutiveFailures = 0 } else if self.fallbackEnabled { self.noteFailure() }
                 self.startSynthesis()
-                if let clip, !self.appleForRest {
-                    self.consecutiveFailures = 0
+                if let clip, useCloud {
                     self.onSentenceStarted?(head.text, false)
+                    guard !self.utteranceCancelled else { continue }
                     self.schedule(clip, restartPlayer: !self.streamStarted)
                     self.streamStarted = true
                 } else if self.fallbackEnabled {
@@ -204,19 +210,26 @@ final class CloudTTSService: ObservableObject {
     /// it have played out, and before the next one. The drainer waits here, so the two audio
     /// paths never overlap and `isSpeaking` stays true throughout.
     private func speakWithAppleVoice(_ sentence: String) async {
-        consecutiveFailures += 1
-        if consecutiveFailures >= 2 && !appleForRest {
-            // Probably offline: stop asking the cloud for the rest of this reply.
-            NSLog("[%@] two sentences failed in a row, using the Apple voice for the rest", provider.name)
-            appleForRest = true
-        }
-        while pendingBuffers > 0 && !utteranceCancelled {
+        // A stop, then a new reply, can happen during the wait: only speak for this one.
+        let generation = utteranceGeneration
+        var current: Bool { !utteranceCancelled && utteranceGeneration == generation }
+        while pendingBuffers > 0 && current {
             try? await Task.sleep(for: .milliseconds(30))
         }
-        guard !utteranceCancelled else { return }
+        guard current else { return }
         onSentenceStarted?(sentence, true)
+        guard current else { return }
         MetricsCollector.shared.markFirstAudio()
         await fallback.speak(sentence)
+    }
+
+    private func noteFailure() {
+        consecutiveFailures += 1
+        guard consecutiveFailures >= 2, !appleForRest else { return }
+        // Probably offline: stop asking the cloud for the rest of this reply.
+        NSLog("[%@] two sentences failed in a row, using the Apple voice for the rest", provider.name)
+        appleForRest = true
+        clipQueue.forEach { $0.clip.cancel() }   // requests already out come back as failures
     }
 
     /// Ambient narration (watch loop): speaks only into silence and drops itself if a reply
@@ -341,6 +354,7 @@ final class AppleFallbackSpeaker: NSObject, AVSpeechSynthesizerDelegate {
     /// The utterance being spoken and its waiter. A stopped utterance reports didCancel later,
     /// so callbacks only finish the utterance they're about.
     private var current: (id: ObjectIdentifier, finished: CheckedContinuation<Void, Never>)?
+    private(set) var utterances = 0
 
     override init() {
         super.init()
@@ -356,6 +370,7 @@ final class AppleFallbackSpeaker: NSObject, AVSpeechSynthesizerDelegate {
         } else {
             utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
         }
+        utterances += 1
         await withCheckedContinuation { continuation in
             current = (ObjectIdentifier(utterance), continuation)
             synthesizer.speak(utterance)

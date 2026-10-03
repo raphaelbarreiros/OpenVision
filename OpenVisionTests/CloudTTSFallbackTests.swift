@@ -23,6 +23,14 @@ final class CloudTTSFallbackTests: XCTestCase {
         XCTAssertEqual(events.map(\.1), [false, true, true, true], "no alternating voices once offline")
     }
 
+    func testAfterTwoFailuresTheCloudIsNotAskedAgain() async throws {
+        let requests = RequestLog()
+        let service = CloudTTSService(provider: Self.fakeProvider(failing: ["two", "three"], log: requests))
+        await service.speak("One. Sentence two. Sentence three. Four. Five. Six.")
+        try await waitUntilQuiet(service)
+        XCTAssertFalse(requests.texts.contains("Six."), "sentence six was never sent: \(requests.texts)")
+    }
+
     func testStopDuringTheFallbackStopsEverything() async throws {
         let service = CloudTTSService(provider: Self.fakeProvider(failing: ["two"]))
         var events: [(String, Bool)] = []
@@ -35,6 +43,7 @@ final class CloudTTSFallbackTests: XCTestCase {
         try await Task.sleep(for: .seconds(1))
         XCTAssertEqual(events.map(\.0), ["Sentence one.", "Sentence two."])
         XCTAssertFalse(service.isSpeaking)
+        XCTAssertEqual(service.fallbackUtterances, 0, "the Apple sentence must not start after the stop")
     }
 
     func testVoicePreviewDoesNotFallBack() async throws {
@@ -68,12 +77,15 @@ final class CloudTTSFallbackTests: XCTestCase {
 
     /// Fails any sentence containing one of `failing` like a dropped connection; others get a
     /// short silent clip.
-    private static func fakeProvider(failing: Set<String>) -> CloudVoiceProvider {
+    private final class RequestLog { var texts: [String] = [] }
+
+    private static func fakeProvider(failing: Set<String>, log: RequestLog? = nil) -> CloudVoiceProvider {
         CloudVoiceProvider(
             name: "FakeTTS",
             isReady: { true },
             selectedVoice: { "test" },
             synthesize: { text, _ in
+                log?.texts.append(text)
                 if failing.contains(where: { text.lowercased().contains($0) }) { throw URLError(.timedOut) }
                 let response = HTTPURLResponse(url: URL(string: "https://tts.test")!, statusCode: 200,
                                                httpVersion: nil, headerFields: nil)!
