@@ -402,6 +402,7 @@ final class VoiceAgentViewModel: ObservableObject {
     }
 
     func stopSession() {
+        cancelPendingAnswer()
         // If in live video mode, stop it first
         if isLiveVideoMode {
             Task {
@@ -465,6 +466,7 @@ final class VoiceAgentViewModel: ObservableObject {
         // to be recorded as failed by the next beginTurn.
         MetricsCollector.shared.markInterrupted()
         MetricsCollector.shared.markSpokeDone()
+        cancelPendingAnswer()
         commandTurnActive = false
         ttsService.stop()
         NeuralSpeech.stopAll()
@@ -594,6 +596,9 @@ final class VoiceAgentViewModel: ObservableObject {
             self?.performFullStop()
         }
 
+        HermesGatewayClient.shared.cancelQuestion = { [weak self] in
+            self?.cancelPendingAnswer()
+        }
         HermesGatewayClient.shared.askUser = { [weak self] prompt in
             await self?.askUser(prompt)
         }
@@ -658,6 +663,13 @@ final class VoiceAgentViewModel: ObservableObject {
             print("[VoiceAgent] Barge-in detected")
             // Interruption rate is a satisfaction signal: users talk over an agent that is slow,
             // wrong, or too verbose. Recorded on the turn being interrupted.
+            // Talking over a question Hermes asked is answering it early: stop reading it out but
+            // keep the question open (and the turn running) for what they say.
+            if self.pendingAnswer != nil {
+                self.ttsService.stop()
+                NeuralSpeech.stopAll()
+                return
+            }
             MetricsCollector.shared.markInterrupted()
 
             // Stop TTS immediately
@@ -2145,10 +2157,7 @@ final class VoiceAgentViewModel: ObservableObject {
     /// questions): speak it, then return the next thing they say, or nil after a minute. Spoken
     /// directly rather than through speakResponse, so it isn't recorded as the turn's answer.
     func askUser(_ prompt: String) async -> String? {
-        if let previous = pendingAnswer {
-            pendingAnswer = nil
-            previous.continuation.resume(returning: nil)
-        }
+        cancelPendingAnswer()
         if let neuralTTS {
             Task { await neuralTTS.speak(prompt) }
         } else {
@@ -2165,6 +2174,14 @@ final class VoiceAgentViewModel: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Drop the open question with no answer (a stop, a barge-in, or Hermes withdrew it), so a
+    /// later command can't answer it: to an approval, no answer is a no.
+    private func cancelPendingAnswer() {
+        guard let pending = pendingAnswer else { return }
+        pendingAnswer = nil
+        pending.continuation.resume(returning: nil)
     }
 
     // MARK: - History

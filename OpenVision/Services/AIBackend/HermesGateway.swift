@@ -70,6 +70,7 @@ enum HermesGatewayError: LocalizedError, Equatable {
     case turnFailed(String)
     case disconnected
     case timedOut
+    case busy
 
     var errorDescription: String? {
         switch self {
@@ -79,6 +80,7 @@ enum HermesGatewayError: LocalizedError, Equatable {
         case .turnFailed(let message): return "Hermes couldn't answer: \(message)"
         case .disconnected: return "The connection to Hermes dropped. Try again."
         case .timedOut: return "Hermes took too long to answer."
+        case .busy: return "Hermes is still working on your last request."
         }
     }
 }
@@ -91,6 +93,9 @@ final class HermesGatewayClient {
     /// Put a question to the user by voice and return what they say (nil: no answer in time).
     /// Set by the voice agent.
     var askUser: ((String) async -> String?)?
+    /// Drop the question `askUser` is waiting on, when Hermes withdraws its request. Set by the
+    /// voice agent.
+    var cancelQuestion: (() -> Void)?
 
     /// How long one turn may run (tools included) before we give up waiting.
     nonisolated static let turnTimeout: TimeInterval = 300
@@ -111,6 +116,10 @@ final class HermesGatewayClient {
     /// The turn we're waiting on: armed before prompt.submit, finished by message.complete. `id`
     /// lets a turn's timeout tell itself apart from a later turn in the same session.
     private var turn: (id: UUID, session: String, started: Bool, continuation: CheckedContinuation<String, Error>)?
+    /// The server request the user is being asked about, and requests Hermes withdrew while we
+    /// were asking (no reply is sent for those).
+    private var askingRequestId: String?
+    private var withdrawnRequests: Set<String> = []
 
     private init() {}
 
@@ -143,6 +152,8 @@ final class HermesGatewayClient {
     }
 
     private func runTurn(session: String, text: String, imageData: Data?) async throws -> String {
+        // One turn at a time: a second one would replace the first, whose caller then waits forever.
+        guard turn == nil else { throw HermesGatewayError.busy }
         if let imageData {
             _ = try await callCompatible("image.attach_bytes", [
                 "session_id": session,
@@ -152,6 +163,8 @@ final class HermesGatewayClient {
         }
         let turnId = UUID()
         return try await withCheckedThrowingContinuation { continuation in
+            // Checked again: another turn may have started while the image was uploading.
+            guard turn == nil else { return continuation.resume(throwing: HermesGatewayError.busy) }
             turn = (turnId, session, false, continuation)
             Task {
                 do {
@@ -408,8 +421,9 @@ final class HermesGatewayClient {
     // MARK: - Connection
 
     private func ensureConnected(base: URL) async throws {
-        if socket != nil { return }
+        // `connecting` first: `socket` is set before the handshake finishes.
         if let connecting { return try await connecting.value }
+        if socket != nil { return }
         let task = Task { try await connect(base: base) }
         connecting = task
         defer { connecting = nil }
@@ -427,7 +441,18 @@ final class HermesGatewayClient {
         self.socket = socket
         socket.resume()
         receive(on: socket)
+        do {
+            try await handshake()
+        } catch {
+            // Don't leave a half-set-up socket for the next turn to reuse: it reconnects instead.
+            if self.socket === socket { disconnect(error) }
+            throw error
+        }
+        NSLog("[HermesGW] connected")
+    }
 
+    /// Wait for gateway.ready, then declare that we answer server requests.
+    private func handshake() async throws {
         let readyEvent: HermesJSON = try await withCheckedThrowingContinuation { continuation in
             ready = continuation
             Task {
@@ -442,7 +467,6 @@ final class HermesGatewayClient {
         _ = try await call("client.capabilities", ["server_requests": true], timeout: 15)
         let payload = readyEvent.object["payload"] as? [String: Any]
         if payload?["heartbeat"] as? Bool == true { startHeartbeat() }
-        NSLog("[HermesGW] connected")
     }
 
     /// POST /api/auth/ws-ticket with the access token; one forced refresh on 401.
@@ -642,7 +666,15 @@ final class HermesGatewayClient {
                 let question = ConversationManager.shared.currentConversation?.title
                 scheduleRename(runtimeId, hermesTitle: title, fallback: question == "New Conversation" ? nil : question)
             }
-        case "message.start", "message.complete", "error", "request.cancel":
+        case "request.cancel":
+            // Hermes withdrew a request (timed out, interrupted, answered elsewhere): stop asking.
+            let payload = params["payload"] as? [String: Any] ?? [:]
+            NSLog("[HermesGW] request withdrawn: %@", (payload["reason"] as? String) ?? "-")
+            if let id = payload["id"] as? String ?? (payload["id"] as? Int).map(String.init), id == askingRequestId {
+                withdrawnRequests.insert(id)
+                cancelQuestion?()
+            }
+        case "message.start", "message.complete", "error":
             NSLog("[HermesGW] event %@ session=%@", type, (params["session_id"] as? String) ?? "-")
             handleTurnEvent(type, params)
         default:
@@ -736,11 +768,17 @@ final class HermesGatewayClient {
         NSLog("[HermesGW] server asks: %@", method)
         switch method {
         case "approval":
+            askingRequestId = id
             let choice = await approve(params)
+            if askingRequestId == id { askingRequestId = nil }
+            guard withdrawnRequests.remove(id) == nil else { return }
             NSLog("[HermesGW] approval answered: %@", choice)
             send(["jsonrpc": "2.0", "id": id, "result": ["choice": choice]])
         case "clarify":
+            askingRequestId = id
             let answers = await clarify(params)
+            if askingRequestId == id { askingRequestId = nil }
+            guard withdrawnRequests.remove(id) == nil else { return }
             send(["jsonrpc": "2.0", "id": id, "result": answers.map { ["answers": $0] } ?? [:]])
         default:
             // sudo, secret, vault.*, display.install.sudo, …: never by voice.
