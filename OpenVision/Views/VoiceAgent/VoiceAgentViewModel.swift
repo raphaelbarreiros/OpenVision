@@ -72,6 +72,8 @@ final class VoiceAgentViewModel: ObservableObject {
     /// A question put to the user mid-turn (a Hermes approval or clarifying question). The next
     /// captured utterance answers it instead of starting a new command.
     private var pendingAnswer: (id: UUID, continuation: CheckedContinuation<String?, Never>)?
+    /// Starts the neural voice reading the open question; cancelled with the question.
+    private var questionPrompt: Task<Void, Never>?
     /// History (live modes): last streamed AI turn already recorded, to dedupe turn-complete events.
     private var historyLastLiveReply = ""
 
@@ -416,8 +418,11 @@ final class VoiceAgentViewModel: ObservableObject {
                 await OpenClawService.shared.disconnect()
             case .geminiLive:
                 await GeminiLiveService.shared.disconnect()
-            case .openAI, .grok, .hermes:
+            case .openAI, .grok:
                 break   // stateless HTTP — nothing to disconnect
+            case .hermes:
+                // Stop the gateway turn too, or the next request finds it still running.
+                await HermesGatewayClient.shared.interrupt()   // no-op in API-key mode
             case .appleFoundation:
                 break   // OS-managed — nothing to disconnect
             case .localGemma:
@@ -1005,7 +1010,9 @@ final class VoiceAgentViewModel: ObservableObject {
             }
             // OpenAI, Grok and Hermes are plain request/response with no session to keep "thinking" alive —
             // restore the listening state inline. The others restore via their callbacks.
-            if [.openAI, .grok, .hermes].contains(backend.backendType) {
+            // (Not while the reply is playing: speech ending restores it.)
+            if [.openAI, .grok, .hermes].contains(backend.backendType),
+               !ttsService.isSpeaking, !NeuralSpeech.isAnySpeaking {
                 agentState = isSessionActive ? .listening : .idle
             }
         } catch {
@@ -2159,7 +2166,10 @@ final class VoiceAgentViewModel: ObservableObject {
     func askUser(_ prompt: String) async -> String? {
         cancelPendingAnswer()
         if let neuralTTS {
-            Task { await neuralTTS.speak(prompt) }
+            questionPrompt = Task {
+                guard !Task.isCancelled else { return }
+                await neuralTTS.speak(prompt)
+            }
         } else {
             ttsService.speak(prompt)
         }
@@ -2181,6 +2191,11 @@ final class VoiceAgentViewModel: ObservableObject {
     private func cancelPendingAnswer() {
         guard let pending = pendingAnswer else { return }
         pendingAnswer = nil
+        // Stop reading the question out, too: it no longer takes an answer.
+        questionPrompt?.cancel()
+        questionPrompt = nil
+        ttsService.stop()
+        NeuralSpeech.stopAll()
         pending.continuation.resume(returning: nil)
     }
 
