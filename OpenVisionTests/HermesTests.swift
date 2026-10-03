@@ -84,7 +84,10 @@ final class HermesTests: XCTestCase {
         XCTAssertNotEqual(HermesDashboard.provider(base: dashboard).id, other.id,
                           "a changed address must not reuse another server's tokens")
         XCTAssertEqual(HermesDashboard.provider(base: dashboard).id,
-                       HermesDashboard.provider(base: URL(string: "https://HERMES.example.com/hermes")!).id)
+                       HermesDashboard.provider(base: URL(string: "HTTPS://HERMES.example.com/hermes")!).id)
+        XCTAssertNotEqual(HermesDashboard.provider(base: dashboard).id,
+                          HermesDashboard.provider(base: URL(string: "https://hermes.example.com/Hermes")!).id,
+                          "paths are case-sensitive")
     }
 
     func testExpiredHermesRefreshSignsOut() {
@@ -100,6 +103,8 @@ final class HermesTests: XCTestCase {
         XCTAssertEqual(HermesDashboard.webSocketURL(base: URL(string: "http://100.88.1.2:9119")!, ticket: "t")?.absoluteString,
                        "ws://100.88.1.2:9119/api/ws?ticket=t")
         XCTAssertNil(HermesDashboard.base(from: "hermes.example.com"))
+        XCTAssertNil(HermesDashboard.base(from: "http://hermes.example.com"), "no tokens over plain http on the internet")
+        XCTAssertNotNil(HermesDashboard.base(from: "http://192.168.1.20:9119"))
     }
 
     func testAppSignInNeedsGatedDashboardWithNativeFlow() {

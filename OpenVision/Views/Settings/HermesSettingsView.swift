@@ -146,7 +146,7 @@ struct HermesSettingsView: View {
             Text("Web UI Address")
         } footer: {
             if HermesService.isUnencryptedRemote(dashboardURL) {
-                Label("This address isn't encrypted. Use https or a Tailscale address: Hermes' web UI login is meant for a trusted network or VPN.",
+                Label("This address isn't encrypted, so signing in is turned off. Use https or a Tailscale address: Hermes' web UI login is meant for a trusted network or VPN.",
                       systemImage: "exclamationmark.triangle.fill")
                     .foregroundColor(.orange).font(.caption)
             } else {

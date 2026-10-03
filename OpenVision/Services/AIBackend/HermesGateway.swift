@@ -42,7 +42,13 @@ enum HermesDashboard {
     /// The Keychain account for one server's sign-in: per server, so changing the address can't
     /// send one server's tokens to another.
     nonisolated static func accountId(base: URL) -> String {
-        "hermes-dashboard:" + base.absoluteString.lowercased()
+        // Scheme and host are case-insensitive; the path isn't (two proxy mounts can differ by case).
+        guard var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
+            return "hermes-dashboard:" + base.absoluteString
+        }
+        components.scheme = components.scheme?.lowercased()
+        components.host = components.host?.lowercased()
+        return "hermes-dashboard:" + (components.string ?? base.absoluteString)
     }
 
     /// The dashboard base for whatever the user typed (`https://host`, a proxy prefix like
@@ -52,6 +58,8 @@ enum HermesDashboard {
         while text.hasSuffix("/") { text.removeLast() }
         guard let url = URL(string: text), let scheme = url.scheme?.lowercased(),
               scheme == "https" || scheme == "http", url.host != nil else { return nil }
+        // The sign-in sends bearer tokens: plain http only on a local network or a tailnet.
+        if HermesService.isUnencryptedRemote(text) { return nil }
         return url
     }
 
@@ -153,6 +161,11 @@ final class HermesGatewayClient {
 
     /// Stop the turn in progress (barge-in).
     func interrupt() async {
+        if turn == nil, preparingTurn != nil {
+            // Still uploading the photo: don't submit the prompt once it's done.
+            preparingTurn = nil
+            return
+        }
         guard let current = turn, let session = runtimeSessionId else { return }
         _ = try? await call("session.interrupt", ["session_id": session], timeout: 10)
         // Hermes ends an interrupted run with message.complete, but not one that hadn't started
@@ -163,9 +176,15 @@ final class HermesGatewayClient {
 
     nonisolated static let interruptGrace: Duration = .seconds(3)
 
+    /// A turn getting ready to submit (uploading its photo); cleared by an interrupt.
+    private var preparingTurn: UUID?
+
     private func runTurn(session: String, text: String, imageData: Data?) async throws -> String {
         // One turn at a time: a second one would replace the first, whose caller then waits forever.
-        guard turn == nil else { throw HermesGatewayError.busy }
+        guard turn == nil, preparingTurn == nil else { throw HermesGatewayError.busy }
+        let turnId = UUID()
+        preparingTurn = turnId
+        defer { if preparingTurn == turnId { preparingTurn = nil } }
         if let imageData {
             _ = try await callCompatible("image.attach_bytes", [
                 "session_id": session,
@@ -173,7 +192,9 @@ final class HermesGatewayClient {
                 "filename": "glasses.jpg",
             ], required: ["session_id", "content_base64"], timeout: 60)
         }
-        let turnId = UUID()
+        // Interrupted while the photo uploaded.
+        guard preparingTurn == turnId else { throw CancellationError() }
+        preparingTurn = nil
         return try await withCheckedThrowingContinuation { continuation in
             // Checked again: another turn may have started while the image was uploading.
             guard turn == nil else { return continuation.resume(throwing: HermesGatewayError.busy) }
@@ -183,7 +204,8 @@ final class HermesGatewayClient {
                     let result = try await submit(text, session: session)
                     NSLog("[HermesGW] prompt %@", (result.object["status"] as? String) ?? "?")
                 } catch {
-                    finishTurn(.failure(error))
+                    // Only this turn: after an interrupt's grace a newer turn may be running.
+                    if turn?.id == turnId { finishTurn(.failure(error)) }
                 }
             }
             Task {
