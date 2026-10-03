@@ -79,6 +79,14 @@ final class HermesTests: XCTestCase {
         XCTAssertEqual(creds.refreshToken, "RT")
     }
 
+    func testEachServerHasItsOwnSignIn() {
+        let other = HermesDashboard.provider(base: URL(string: "https://other.example.com")!)
+        XCTAssertNotEqual(HermesDashboard.provider(base: dashboard).id, other.id,
+                          "a changed address must not reuse another server's tokens")
+        XCTAssertEqual(HermesDashboard.provider(base: dashboard).id,
+                       HermesDashboard.provider(base: URL(string: "https://HERMES.example.com/hermes")!).id)
+    }
+
     func testExpiredHermesRefreshSignsOut() {
         let body = Data(#"{"error":"session_expired","detail":"Refresh token expired or invalid; start a new sign-in."}"#.utf8)
         XCTAssertTrue(OAuthClient.isRevoked(status: 401, errorCode: OAuthClient.tokenErrorCode(body)))
@@ -188,6 +196,8 @@ final class HermesTests: XCTestCase {
 
     func testTurnResult() {
         XCTAssertEqual(try HermesGatewayClient.turnResult(["text": " Done. ", "status": "complete"]).get(), "Done.")
+        XCTAssertEqual(try HermesGatewayClient.turnResult(["text": "", "status": "complete"]).get(), "Done.",
+                       "a tool-only run has no text")
         XCTAssertThrowsError(try HermesGatewayClient.turnResult(["text": "", "status": "error", "error": "model down"]).get())
         XCTAssertThrowsError(try HermesGatewayClient.turnResult(["text": "partial", "status": "interrupted"]).get())
     }
@@ -201,6 +211,19 @@ final class HermesTests: XCTestCase {
         XCTAssertFalse(HermesGatewayClient.isYes("yes, no wait"), "any no wins")
         XCTAssertFalse(HermesGatewayClient.isYes("what's the weather"), "unclear is a no")
         XCTAssertFalse(HermesGatewayClient.isYes(nil), "silence is not consent")
+        for yes in ["sure", "OK", "okay", "allow it", "approve", "proceed", "yep", "do it"] {
+            XCTAssertTrue(HermesGatewayClient.isYes(yes), yes)
+        }
+        for no in ["nope", "nah", "cancel", "deny", "stop", "never", "do not run it", "not now"] {
+            XCTAssertFalse(HermesGatewayClient.isYes(no), no)
+        }
+    }
+
+    func testCommandsThatDiscardStateNeedAYes() {
+        for command in ["/clear", "/undo", "/rollback", "/yolo", "/restart"] {
+            XCTAssertTrue(HermesGatewayClient.confirmedCommands.contains(command), command)
+        }
+        XCTAssertFalse(HermesGatewayClient.confirmedCommands.contains("/usage"))
     }
 
     // MARK: - Prompt

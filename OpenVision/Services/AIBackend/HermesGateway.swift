@@ -24,7 +24,7 @@ enum HermesDashboard {
 
     nonisolated static func provider(base: URL) -> OAuthProvider {
         OAuthProvider(
-            id: "hermes-dashboard",
+            id: accountId(base: base),
             displayName: "Hermes",
             authorizeURL: base.appendingPathComponent("auth/native/authorize"),
             tokenURL: base.appendingPathComponent("auth/native/token"),
@@ -37,6 +37,12 @@ enum HermesDashboard {
             dialect: .hermesNative,
             refreshURL: base.appendingPathComponent("auth/native/refresh")
         )
+    }
+
+    /// The Keychain account for one server's sign-in: per server, so changing the address can't
+    /// send one server's tokens to another.
+    nonisolated static func accountId(base: URL) -> String {
+        "hermes-dashboard:" + base.absoluteString.lowercased()
     }
 
     /// The dashboard base for whatever the user typed (`https://host`, a proxy prefix like
@@ -147,9 +153,15 @@ final class HermesGatewayClient {
 
     /// Stop the turn in progress (barge-in).
     func interrupt() async {
-        guard turn != nil, let session = runtimeSessionId else { return }
+        guard let current = turn, let session = runtimeSessionId else { return }
         _ = try? await call("session.interrupt", ["session_id": session], timeout: 10)
+        // Hermes ends an interrupted run with message.complete, but not one that hadn't started
+        // yet. Don't leave the turn armed (every request "busy") waiting for it.
+        try? await Task.sleep(for: Self.interruptGrace)
+        if turn?.id == current.id { finishTurn(.failure(CancellationError())) }
     }
+
+    nonisolated static let interruptGrace: Duration = .seconds(3)
 
     private func runTurn(session: String, text: String, imageData: Data?) async throws -> String {
         // One turn at a time: a second one would replace the first, whose caller then waits forever.
@@ -236,6 +248,12 @@ final class HermesGatewayClient {
 
     private var commandCanon: [String: String]?
 
+    /// Slash commands that only run after a spoken yes.
+    nonisolated static let confirmedCommands: Set<String> = [
+        "/clear", "/undo", "/retry", "/rollback", "/snapshot", "/compress", "/stop", "/pause",
+        "/restart", "/update", "/yolo", "/approvals", "/quit", "/import", "/reload", "/reload-mcp",
+    ]
+
     /// Run a spoken slash command and return what to say.
     func runSlash(_ spoken: String) async throws -> String {
         guard let base = HermesDashboard.base(from: settings.hermesDashboardURL),
@@ -259,6 +277,14 @@ final class HermesGatewayClient {
             ConversationContext.shared.clear()
             runtimeSessionId = nil
             return "Started a new chat."
+        }
+
+        if Self.confirmedCommands.contains(match.command) {
+            // These change or throw away state (or approvals): one misheard utterance mustn't.
+            let spokenName = match.command.dropFirst()
+            guard let askUser else { return "Run /\(spokenName) from Hermes itself." }
+            let reply = await askUser("Run \(spokenName) on Hermes? Say yes or no.")
+            guard Self.isYes(reply) else { return "Okay, I didn't run \(spokenName)." }
         }
 
         let session = try await ensureSession()
@@ -442,7 +468,7 @@ final class HermesGatewayClient {
         socket.resume()
         receive(on: socket)
         do {
-            try await handshake()
+            try await handshake(on: socket)
         } catch {
             // Don't leave a half-set-up socket for the next turn to reuse: it reconnects instead.
             if self.socket === socket { disconnect(error) }
@@ -452,12 +478,13 @@ final class HermesGatewayClient {
     }
 
     /// Wait for gateway.ready, then declare that we answer server requests.
-    private func handshake() async throws {
+    private func handshake(on socket: URLSessionWebSocketTask) async throws {
         let readyEvent: HermesJSON = try await withCheckedThrowingContinuation { continuation in
             ready = continuation
             Task {
                 try? await Task.sleep(for: .seconds(15))
-                if let ready = self.ready {
+                // Only this attempt's wait: after a drop and reconnect, `ready` is the new one's.
+                if self.socket === socket, let ready = self.ready {
                     self.ready = nil
                     ready.resume(throwing: HermesGatewayError.connectFailed("no answer from the gateway"))
                 }
@@ -513,6 +540,11 @@ final class HermesGatewayClient {
         heartbeat?.cancel()
         heartbeat = nil
         runtimeSessionId = nil
+        if askingRequestId != nil {
+            // The request died with the connection; don't let the next utterance answer it.
+            askingRequestId = nil
+            cancelQuestion?()
+        }
         if let ready { self.ready = nil; ready.resume(throwing: error) }
         let waiting = pending
         pending.removeAll()
@@ -750,7 +782,8 @@ final class HermesGatewayClient {
         let text = (payload["text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         switch payload["status"] as? String ?? "complete" {
         case "complete":
-            return text.isEmpty ? .failure(HermesGatewayError.turnFailed("empty reply")) : .success(text)
+            // A run that only used tools can finish without any text.
+            return .success(text.isEmpty ? "Done." : text)
         case "interrupted":
             return .failure(CancellationError())
         default:

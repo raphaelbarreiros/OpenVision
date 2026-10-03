@@ -218,6 +218,7 @@ final class VoiceAgentViewModel: ObservableObject {
             // session, so the post-reply audio rebuild never ran.)
             if isSessionActive && agentState == .listening {
                 print("[VoiceAgent] Voice service idle, stopping session")
+                cancelPendingAnswer()
                 isSessionActive = false
                 agentState = .idle
                 // Disconnect AI backend
@@ -621,9 +622,13 @@ final class VoiceAgentViewModel: ObservableObject {
             }
 
             // An answer to a question the agent asked mid-turn, not a new command.
+            if self.pendingAnswer != nil, self.settingsManager.settings.aiBackend != .hermes {
+                self.cancelPendingAnswer()   // backend switched mid-question: this is a new command
+            }
             if let pending = self.pendingAnswer {
                 self.pendingAnswer = nil
                 self.userTranscript = command
+                self.agentState = .thinking   // Hermes carries on with the answer
                 pending.continuation.resume(returning: command)
                 return
             }
@@ -707,6 +712,13 @@ final class VoiceAgentViewModel: ObservableObject {
             // re-arms conversation mode so the user can keep asking until they say "stop video".
             if self.isLiveVideoMode {
                 print("[VoiceAgent] Conversation timeout during live video — staying live")
+                return
+            }
+            if self.pendingAnswer != nil {
+                // Silence answers a Hermes question with no, but its turn and the session go on.
+                print("[VoiceAgent] Conversation timeout during a Hermes question - answering no")
+                self.cancelPendingAnswer()
+                self.agentState = .thinking
                 return
             }
             print("[VoiceAgent] Conversation timeout - returning to idle")
