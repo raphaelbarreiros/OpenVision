@@ -17,6 +17,18 @@ final class CloudTTSFallbackTests: XCTestCase {
         XCTAssertEqual(events.map(\.1), [false, true, false, false], "only sentence two in the Apple voice")
     }
 
+    func testAppleSentenceWaitsForTheCloudClipBeforeIt() async throws {
+        // Sentence one plays for a full second; the Apple voice must not start over it.
+        let service = CloudTTSService(provider: Self.fakeProvider(failing: ["two"], clipSeconds: 1.0))
+        var starts: [(sentence: String, apple: Bool, at: Date)] = []
+        service.onSentenceStarted = { starts.append(($0, $1, Date())) }
+        await service.speak("Sentence one. Sentence two.")
+        try await waitUntilQuiet(service)
+        XCTAssertEqual(starts.map(\.apple), [false, true])
+        let gap = starts[1].at.timeIntervalSince(starts[0].at)
+        XCTAssertGreaterThanOrEqual(gap, 0.9, "the Apple voice started \(gap)s after a 1s cloud clip")
+    }
+
     func testTwoFailuresInARowMoveTheRestToTheAppleVoice() async throws {
         let events = try await play(reply, failing: ["two", "three"])
         XCTAssertEqual(events.map(\.0), ["Sentence one.", "Sentence two.", "Sentence three.", "Sentence four."])
@@ -85,7 +97,8 @@ final class CloudTTSFallbackTests: XCTestCase {
     /// short silent clip.
     private final class RequestLog { var texts: [String] = [] }
 
-    private static func fakeProvider(failing: Set<String>, log: RequestLog? = nil) -> CloudVoiceProvider {
+    private static func fakeProvider(failing: Set<String>, log: RequestLog? = nil,
+                                     clipSeconds: Double = 0.15) -> CloudVoiceProvider {
         CloudVoiceProvider(
             name: "FakeTTS",
             isReady: { true },
@@ -95,7 +108,7 @@ final class CloudTTSFallbackTests: XCTestCase {
                 if failing.contains(where: { text.lowercased().contains($0) }) { throw URLError(.timedOut) }
                 let response = HTTPURLResponse(url: URL(string: "https://tts.test")!, statusCode: 200,
                                                httpVersion: nil, headerFields: nil)!
-                return (silentWAV(seconds: 0.15), response)
+                return (silentWAV(seconds: clipSeconds), response)
             }
         )
     }
