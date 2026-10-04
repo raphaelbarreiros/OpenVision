@@ -56,6 +56,12 @@ final class CloudTTSFallbackTests: XCTestCase {
         XCTAssertNotNil(service.lastFailure)
     }
 
+    func testAppleSentenceWaitIsBounded() {
+        XCTAssertEqual(AppleFallbackSpeaker.deadline(for: "Short."), .seconds(5))
+        let long = String(repeating: "word ", count: 40)
+        XCTAssertEqual(AppleFallbackSpeaker.deadline(for: long), .milliseconds(120 * long.count))
+    }
+
     // MARK: - Helpers
 
     private func play(_ text: String, failing: Set<String>) async throws -> [(String, Bool)] {

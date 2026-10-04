@@ -39,7 +39,11 @@ final class TTSService: NSObject, ObservableObject {
 
     // MARK: - Voice Selection
 
-    private var selectedVoice: AVSpeechSynthesisVoice? {
+    private var selectedVoice: AVSpeechSynthesisVoice? { Self.userVoice }
+
+    /// The Apple voice chosen in Settings, or the default English voice. Also used by the cloud
+    /// voices' Apple fallback, so the choice lives in one place.
+    static var userVoice: AVSpeechSynthesisVoice? {
         // Check if user has selected a specific voice
         if let identifier = SettingsManager.shared.settings.selectedVoiceIdentifier,
            let voice = AVSpeechSynthesisVoice(identifier: identifier) {
