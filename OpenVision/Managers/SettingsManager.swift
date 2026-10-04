@@ -39,6 +39,12 @@ final class SettingsManager: ObservableObject {
     private var secretsKeptInFile: Set<String> = []
     /// Unreadable secrets the user reset: deleted, not restored, once the Keychain can be read.
     private var secretsToClear: Set<String> = []
+    /// Cleared secrets whose Keychain delete failed. Kept across launches, so a value still in
+    /// the Keychain isn't loaded back; the delete is retried on every save until it succeeds.
+    private var pendingDeletions = Set(UserDefaults.standard.stringArray(forKey: SettingsManager.pendingDeletionsKey) ?? []) {
+        didSet { UserDefaults.standard.set(Array(pendingDeletions), forKey: Self.pendingDeletionsKey) }
+    }
+    private static let pendingDeletionsKey = "SettingsSecrets.pendingDeletions"
 
     // MARK: - Callbacks
 
@@ -54,8 +60,14 @@ final class SettingsManager: ObservableObject {
 
         // Load existing settings or create defaults, then the secrets from the Keychain
         let fileSettings = Self.loadSettings(from: settingsURL)
+        for account in pendingDeletions where SettingsSecrets.write("", account: account) {
+            pendingDeletions.remove(account)
+        }
         var keychain: [String: SettingsSecrets.Stored] = [:]
-        for (account, _) in SettingsSecrets.fields { keychain[account] = SettingsSecrets.read(account) }
+        for (account, _) in SettingsSecrets.fields {
+            // A key the user cleared stays cleared, even if the Keychain still has it.
+            keychain[account] = pendingDeletions.contains(account) ? .none : SettingsSecrets.read(account)
+        }
         let merged = SettingsSecrets.merge(file: fileSettings, keychain: keychain)
         settings = merged.settings
         unreadableSecrets = merged.unreadable
@@ -178,7 +190,8 @@ final class SettingsManager: ObservableObject {
         reloadUnreadableSecrets()
         for (account, keyPath) in SettingsSecrets.fields where !unreadableSecrets.contains(account) {
             let value = settings[keyPath: keyPath]
-            guard storedSecrets[account, default: ""] != value else {
+            let retryDelete = value.isEmpty && pendingDeletions.contains(account)
+            guard storedSecrets[account, default: ""] != value || retryDelete else {
                 // The Keychain already has it (e.g. changed back after a failed write).
                 secretsKeptInFile.remove(account)
                 continue
@@ -186,6 +199,9 @@ final class SettingsManager: ObservableObject {
             if SettingsSecrets.write(value, account: account) {
                 storedSecrets[account] = value
                 secretsKeptInFile.remove(account)
+                if pendingDeletions.contains(account) { pendingDeletions.remove(account) }
+            } else if value.isEmpty {
+                pendingDeletions.insert(account)   // retried, and never loaded back meanwhile
             } else {
                 secretsKeptInFile.insert(account)
             }
