@@ -32,6 +32,16 @@ final class HermesTests: XCTestCase {
         XCTAssertEqual(HermesService.withScheme("http://8.8.8.8"), "http://8.8.8.8", "a typed scheme is kept")
     }
 
+    func testDotlessAndTailnetPortAddressesUsePlainHTTP() {
+        XCTAssertEqual(HermesService.apiBase(from: "nuc:8642")?.absoluteString, "http://nuc:8642/v1")
+        XCTAssertEqual(HermesDashboard.base(from: "hermes-box")?.absoluteString, "http://hermes-box",
+                       "a LAN name can sign in over plain http")
+        XCTAssertEqual(HermesService.apiBase(from: "myhost.tailnet.ts.net:8642")?.absoluteString,
+                       "http://myhost.tailnet.ts.net:8642/v1", "a port means not tailscale serve")
+        XCTAssertFalse(HermesService.isUnencryptedRemote("http://nuc:8642"))
+        XCTAssertTrue(HermesService.isUnencryptedRemote("http://hermes.example.com"), "public hosts still warn")
+    }
+
     func testAPIBaseRejectsNonHTTP() {
         XCTAssertNil(HermesService.apiBase(from: ""))
         XCTAssertNil(HermesService.apiBase(from: "ftp://hermes.example.com"))

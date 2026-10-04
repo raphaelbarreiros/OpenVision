@@ -78,7 +78,7 @@ struct HermesSettingsView: View {
     @ViewBuilder
     private var apiKeySections: some View {
         Section {
-            TextField("https://hermes.example.com", text: $serverURL)
+            TextField("hermes.example.com", text: $serverURL)
                 .autocapitalization(.none)
                 .autocorrectionDisabled()
                 .keyboardType(.URL)
@@ -137,7 +137,7 @@ struct HermesSettingsView: View {
     @ViewBuilder
     private var passwordSections: some View {
         Section {
-            TextField("https://hermes.example.com", text: $dashboardURL)
+            TextField("hermes.example.com", text: $dashboardURL)
                 .autocapitalization(.none)
                 .autocorrectionDisabled()
                 .keyboardType(.URL)
