@@ -34,11 +34,12 @@ final class HermesTests: XCTestCase {
 
     func testDotlessAndTailnetPortAddressesUsePlainHTTP() {
         XCTAssertEqual(HermesService.apiBase(from: "nuc:8642")?.absoluteString, "http://nuc:8642/v1")
-        XCTAssertEqual(HermesDashboard.base(from: "hermes-box")?.absoluteString, "http://hermes-box",
-                       "a LAN name can sign in over plain http")
         XCTAssertEqual(HermesService.apiBase(from: "myhost.tailnet.ts.net:8642")?.absoluteString,
                        "http://myhost.tailnet.ts.net:8642/v1", "a port means not tailscale serve")
-        XCTAssertFalse(HermesService.isUnencryptedRemote("http://nuc:8642"))
+        // The guess isn't trust: a dot-less name may resolve through a search domain.
+        XCTAssertTrue(HermesService.isUnencryptedRemote("nuc:8642"), "still warns before sending the API key")
+        XCTAssertNil(HermesDashboard.base(from: "hermes-box"), "no plain-http sign-in on a dot-less name")
+        XCTAssertFalse(HermesService.isUnencryptedRemote("http://localhost"))
         XCTAssertTrue(HermesService.isUnencryptedRemote("http://hermes.example.com"), "public hosts still warn")
     }
 

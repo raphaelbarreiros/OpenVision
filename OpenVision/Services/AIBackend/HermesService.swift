@@ -169,12 +169,10 @@ final class HermesService: ObservableObject {
         return !isLocalHost(host) && !host.hasSuffix(".ts.net")
     }
 
-    /// Loopback, `.local`, a dot-less name (`nuc`, `hermes-box`: only the local network or its
-    /// search domain resolves those), or a private / Tailscale IPv4 address.
+    /// Loopback, `.local`, or a private / Tailscale IPv4 address.
     nonisolated static func isLocalHost(_ host: String) -> Bool {
         let host = host.lowercased()
         if host == "localhost" || host.hasSuffix(".local") { return true }
-        if !host.isEmpty, !host.contains("."), !host.contains(":") { return true }
         let octets = host.split(separator: ".").compactMap { Int($0) }
         guard octets.count == 4 else { return false }
         switch (octets[0], octets[1]) {
@@ -186,16 +184,19 @@ final class HermesService: ObservableObject {
     }
 
     /// The address with a scheme, for one typed without (`myhost.ts.net`, `100.88.1.2:8642`):
-    /// http for a local host or Tailscale IP (servers there rarely have a certificate), and for a
-    /// `*.ts.net` name with a port (`tailscale serve` answers https on 443, so a port means the
-    /// server itself); https otherwise.
+    /// http for a local host or Tailscale IP (servers there rarely have a certificate), for a
+    /// dot-less name (`nuc`, almost always a LAN machine), and for a `*.ts.net` name with a port
+    /// (`tailscale serve` answers https on 443, so a port means the server itself); https
+    /// otherwise. Only a guess: a dot-less name could also resolve through a search domain, so
+    /// it still gets the plain-http warning and can't sign in over http.
     nonisolated static func withScheme(_ address: String) -> String {
         let text = address.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !text.contains("://") else { return text }
         let hostAndPort = text.split(separator: "/", maxSplits: 1).first.map(String.init) ?? text
         let host = hostAndPort.split(separator: ":").first.map(String.init) ?? hostAndPort
         let tailnetPort = host.lowercased().hasSuffix(".ts.net") && hostAndPort.contains(":")
-        return (isLocalHost(host) || tailnetPort ? "http://" : "https://") + text
+        let singleLabel = !host.contains(".") && !host.contains(":")
+        return (isLocalHost(host) || singleLabel || tailnetPort ? "http://" : "https://") + text
     }
 
     private static func authorize(_ request: inout URLRequest, key: String, sessionKey: String?) {
