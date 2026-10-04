@@ -4,6 +4,7 @@
 
 import Foundation
 import Combine
+import UIKit
 
 /// Manages app settings with JSON persistence and debounced saving
 @MainActor
@@ -67,6 +68,41 @@ final class SettingsManager: ObservableObject {
             print("[SettingsManager] Moving API keys from settings.json to the Keychain")
             saveNow()
         }
+
+        // A launch before first unlock (Bluetooth relaunch after a reboot) can't read the
+        // Keychain: load the keys as soon as it can, without waiting for a settings change.
+        let center = NotificationCenter.default
+        for name in [UIApplication.protectedDataDidBecomeAvailableNotification, UIApplication.didBecomeActiveNotification] {
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.reloadUnreadableSecrets() }
+            }
+        }
+    }
+
+    /// Read again the secrets the Keychain couldn't give us at launch, and put them back into
+    /// `settings` so the backends see them (the change saves and fires `onSettingsChanged`).
+    func reloadUnreadableSecrets() {
+        guard !unreadableSecrets.isEmpty else { return }
+        var resetWhileLocked = false
+        for (account, keyPath) in SettingsSecrets.fields where unreadableSecrets.contains(account) {
+            switch SettingsSecrets.read(account) {
+            case .unreadable:
+                continue
+            case .value(let stored):
+                storedSecrets[account] = stored
+                if secretsToClear.contains(account) {
+                    resetWhileLocked = true   // the save below deletes it
+                } else if settings[keyPath: keyPath].isEmpty {
+                    settings[keyPath: keyPath] = stored
+                }
+            case .none:
+                break
+            }
+            unreadableSecrets.remove(account)
+            secretsToClear.remove(account)
+        }
+        print("[SettingsManager] Reloaded Keychain secrets; \(unreadableSecrets.count) still unreadable")
+        if resetWhileLocked { scheduleSave() }
     }
 
     // MARK: - Public Methods
@@ -138,24 +174,9 @@ final class SettingsManager: ObservableObject {
 
     /// Write the secrets that changed to the Keychain.
     private func saveSecrets() {
-        for (account, keyPath) in SettingsSecrets.fields {
-            if unreadableSecrets.contains(account) {
-                // Try again: the phone may have been unlocked since launch.
-                switch SettingsSecrets.read(account) {
-                case .unreadable:
-                    continue
-                case .value(let stored):
-                    storedSecrets[account] = stored
-                    // Reset since launch: the write below deletes it instead.
-                    if settings[keyPath: keyPath].isEmpty && !secretsToClear.contains(account) {
-                        settings[keyPath: keyPath] = stored
-                    }
-                case .none:
-                    break
-                }
-                unreadableSecrets.remove(account)
-                secretsToClear.remove(account)
-            }
+        // Try again first: the phone may have been unlocked since launch.
+        reloadUnreadableSecrets()
+        for (account, keyPath) in SettingsSecrets.fields where !unreadableSecrets.contains(account) {
             let value = settings[keyPath: keyPath]
             guard storedSecrets[account, default: ""] != value else {
                 // The Keychain already has it (e.g. changed back after a failed write).

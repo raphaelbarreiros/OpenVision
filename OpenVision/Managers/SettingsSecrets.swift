@@ -92,10 +92,12 @@ enum SettingsSecrets {
             let status = SecItemDelete(baseQuery(account) as CFDictionary)
             return status == errSecSuccess || status == errSecItemNotFound
         }
-        // Accessible after first unlock, like the sign-in tokens: replies still work in a pocket.
+        // Accessible after first unlock, so replies still work in a pocket. Not "this device only"
+        // (unlike the sign-in tokens): pasted API keys travel with an encrypted backup or Quick
+        // Start to a new phone, as they did when they lived in settings.json.
         let attributes: [String: Any] = [
             kSecValueData as String: Data(value.utf8),
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
         ]
         var status = SecItemUpdate(baseQuery(account) as CFDictionary, attributes as CFDictionary)
         if status == errSecItemNotFound {
