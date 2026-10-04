@@ -353,8 +353,14 @@ final class AppleFallbackSpeaker: NSObject, AVSpeechSynthesizerDelegate {
     private let synthesizer = AVSpeechSynthesizer()
     /// The utterance being spoken and its waiter. A stopped utterance reports didCancel later,
     /// so callbacks only finish the utterance they're about.
-    private var current: (id: ObjectIdentifier, finished: CheckedContinuation<Void, Never>)?
+    private var current: (id: ObjectIdentifier, finished: CheckedContinuation<Void, Never>, watchdog: Task<Void, Never>)?
     private(set) var utterances = 0
+
+    /// How long one sentence may take before we stop waiting for the synthesizer: the drainer
+    /// waits here with the recognizer paused, so a lost didFinish must not leave it deaf.
+    nonisolated static func deadline(for sentence: String) -> Duration {
+        .milliseconds(max(5_000, 120 * sentence.count))
+    }
 
     override init() {
         super.init()
@@ -364,15 +370,18 @@ final class AppleFallbackSpeaker: NSObject, AVSpeechSynthesizerDelegate {
     func speak(_ sentence: String) async {
         stop()
         let utterance = AVSpeechUtterance(string: sentence)
-        if let identifier = SettingsManager.shared.settings.selectedVoiceIdentifier,
-           let voice = AVSpeechSynthesisVoice(identifier: identifier) {
-            utterance.voice = voice
-        } else {
-            utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
-        }
+        utterance.voice = TTSService.userVoice
         utterances += 1
+        let id = ObjectIdentifier(utterance)
         await withCheckedContinuation { continuation in
-            current = (ObjectIdentifier(utterance), continuation)
+            let watchdog = Task { [weak self] in
+                try? await Task.sleep(for: Self.deadline(for: sentence))
+                guard !Task.isCancelled, let self, self.current?.id == id else { return }
+                NSLog("[CloudTTS] Apple voice never finished a sentence; moving on")
+                self.synthesizer.stopSpeaking(at: .immediate)
+                self.finish(id)
+            }
+            current = (id, continuation, watchdog)
             synthesizer.speak(utterance)
         }
     }
@@ -385,6 +394,7 @@ final class AppleFallbackSpeaker: NSObject, AVSpeechSynthesizerDelegate {
     private func finish(_ id: ObjectIdentifier) {
         guard let current, current.id == id else { return }
         self.current = nil
+        current.watchdog.cancel()
         current.finished.resume()
     }
 
